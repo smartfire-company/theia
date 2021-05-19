@@ -32,9 +32,9 @@ import {
 } from '@theia/core/lib/browser/authentication-service';
 import { QuickPickItem, QuickPickService } from '@theia/core/lib/common/quick-pick-service';
 import {
-    AuthenticationSession,
-    AuthenticationSessionsChangeEvent
+    AuthenticationSession
 } from '../../common/plugin-api-rpc-model';
+import {AuthenticationProviderAuthenticationSessionsChangeEvent, Event} from '@theia/plugin';
 
 export class AuthenticationMainImpl implements AuthenticationMain {
     private readonly proxy: AuthenticationExt;
@@ -72,7 +72,7 @@ export class AuthenticationMainImpl implements AuthenticationMain {
         this.authenticationService.unregisterAuthenticationProvider(id);
     }
 
-    async $updateSessions(id: string, event: AuthenticationSessionsChangeEvent): Promise<void> {
+    async $updateSessions(id: string, event: AuthenticationProviderAuthenticationSessionsChangeEvent): Promise<void> {
         this.authenticationService.updateSessions(id, event);
     }
 
@@ -284,12 +284,13 @@ export class AuthenticationProviderImpl implements AuthenticationProvider {
         return this.proxy.$getSessions(this.id);
     }
 
-    async updateSessionItems(event: AuthenticationSessionsChangeEvent): Promise<void> {
+    async updateSessionItems(event: AuthenticationProviderAuthenticationSessionsChangeEvent): Promise<void> {
         const { added, removed } = event;
         const session = await this.proxy.$getSessions(this.id);
-        const addedSessions = session.filter(s => added.some(id => id === s.id));
+        const addedSessions = session.filter(s => added.some(addedSession => addedSession.id === s.id));
 
-        removed.forEach(sessionId => {
+        removed.forEach(removedSession => {
+            const sessionId = removedSession.id;
             const accountName = this.sessions.get(sessionId);
             if (accountName) {
                 this.sessions.delete(sessionId);
@@ -313,6 +314,16 @@ export class AuthenticationProviderImpl implements AuthenticationProvider {
     async logout(sessionId: string): Promise<void> {
         await this.proxy.$logout(this.id, sessionId);
         this.messageService.info('Successfully signed out.');
+    }
+
+    readonly onDidChangeSessions:  Event<AuthenticationProviderAuthenticationSessionsChangeEvent>;
+
+    createSession(scopes: string[]): Thenable<AuthenticationSession> {
+        return this.login(scopes);
+    }
+
+    removeSession(sessionId: string): Thenable<void> {
+        return this.logout(sessionId);
     }
 }
 
