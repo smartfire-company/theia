@@ -107,6 +107,7 @@ export interface PreferenceData {
 export interface Plugin {
     pluginPath: string | undefined;
     pluginFolder: string;
+    pluginUri: string;
     model: PluginModel;
     rawModel: PluginPackage;
     lifecycle: PluginLifecycle;
@@ -181,6 +182,7 @@ export const emptyPlugin: Plugin = {
     },
     pluginPath: 'empty',
     pluginFolder: 'empty',
+    pluginUri: 'empty',
     rawModel: {
         name: 'emptyPlugin',
         publisher: 'Theia',
