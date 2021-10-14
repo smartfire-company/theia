@@ -14,7 +14,7 @@
  * SPDX-License-Identifier: EPL-2.0 OR GPL-2.0 WITH Classpath-exception-2.0
  ********************************************************************************/
 
-import { ReactWidget, StatefulWidget } from '@theia/core/lib/browser';
+import { codicon, ReactWidget, StatefulWidget } from '@theia/core/lib/browser';
 import { injectable, postConstruct } from '@theia/core/shared/inversify';
 import * as React from '@theia/core/shared/react';
 import debounce = require('@theia/core/shared/lodash.debounce');
@@ -100,7 +100,7 @@ export class PreferencesSearchbarWidget extends ReactWidget implements StatefulW
      */
     protected renderClearAllOption(): React.ReactNode {
         return <span
-            className={`clear-all option ${(this.searchTermExists() ? 'enabled' : '')}`}
+            className={`${codicon('clear-all')} option ${(this.searchTermExists() ? 'enabled' : '')}`}
             title="Clear Search Results"
             onClick={this.clearSearchResults}
         />;
@@ -119,7 +119,7 @@ export class PreferencesSearchbarWidget extends ReactWidget implements StatefulW
         return search?.value;
     }
 
-    protected updateSearchTerm(searchTerm: string): void {
+    updateSearchTerm(searchTerm: string): void {
         const search = document.getElementById(PreferencesSearchbarWidget.SEARCHBAR_ID) as HTMLInputElement;
         if (!search) {
             return;

@@ -33,7 +33,6 @@ describe('TypeScript', function () {
     const { CommandRegistry } = require('@theia/core/lib/common/command');
     const { KeybindingRegistry } = require('@theia/core/lib/browser/keybinding');
     const { OpenerService, open } = require('@theia/core/lib/browser/opener-service');
-    const { EditorPreviewWidget } = require('@theia/editor-preview/lib/browser/editor-preview-widget');
     const { animationFrame } = require('@theia/core/lib/browser/browser');
     const { PreferenceService, PreferenceScope } = require('@theia/core/lib/browser/preferences/preference-service');
     const { ProgressStatusBarItem } = require('@theia/core/lib/browser/progress-status-bar-item');
@@ -82,7 +81,7 @@ container.load(loggerBackendModule);
 function load(raw) {
     return Promise.resolve(raw.default).then(module =>
         container.load(module)
-    )
+    );
 }
 
 function start(port, host, argv) {
@@ -157,7 +156,7 @@ module.exports = (port, host, argv) => Promise.resolve()
      */
     async function openEditor(uri, preview = false) {
         const widget = await open(openerService, uri, { mode: 'activate', preview });
-        const editorWidget = widget instanceof EditorPreviewWidget ? widget.editorWidget : widget instanceof EditorWidget ? widget : undefined;
+        const editorWidget = widget instanceof EditorWidget ? widget : undefined;
         const editor = MonacoEditor.get(editorWidget);
         assert.isDefined(editor);
 
@@ -173,9 +172,8 @@ module.exports = (port, host, argv) => Promise.resolve()
     }
 
     /**
-     * @template T
-     * @param {() => Promise<T> | T} condition
-     * @returns {Promise<T>}
+     * @param {() => Promise<unknown> | unknown} condition
+     * @returns {Promise<void>}
      */
     function waitForAnimation(condition) {
         return new Promise(async (resolve, dispose) => {
@@ -258,7 +256,7 @@ module.exports = (port, host, argv) => Promise.resolve()
         assert.isFalse(contextKeyService.match('listFocus'));
     }
 
-    it('document formating should be visible and enabled', async function () {
+    it('document formatting should be visible and enabled', async function () {
         await openEditor(serverUri);
         const menu = menuFactory.createContextMenu(EDITOR_CONTEXT_MENU);
         const item = menu.items.find(i => i.command === 'editor.action.formatDocument');
@@ -284,7 +282,7 @@ module.exports = (port, host, argv) => Promise.resolve()
 
                 const activeEditor = /** @type {MonacoEditor} */ (MonacoEditor.get(editorManager.activeEditor));
                 // @ts-ignore
-                assert.equal(editorManager.activeEditor.parent instanceof EditorPreviewWidget, preview);
+                assert.equal(editorManager.activeEditor.isPreview, preview);
                 assert.equal(activeEditor.uri.toString(), serverUri.toString());
                 // const |container = new Container();
                 // @ts-ignore
@@ -307,7 +305,7 @@ module.exports = (port, host, argv) => Promise.resolve()
 
                 const activeEditor = /** @type {MonacoEditor} */ (MonacoEditor.get(editorManager.activeEditor));
                 // @ts-ignore
-                assert.isFalse(editorManager.activeEditor.parent instanceof EditorPreviewWidget);
+                assert.isFalse(editorManager.activeEditor.isPreview);
                 assert.equal(activeEditor.uri.toString(), inversifyUri.toString());
                 // export { |Container } from "./container/container";
                 // @ts-ignore
@@ -328,7 +326,7 @@ module.exports = (port, host, argv) => Promise.resolve()
 
                 const activeEditor = /** @type {MonacoEditor} */ (MonacoEditor.get(editorManager.activeEditor));
                 // @ts-ignore
-                assert.isTrue(editorManager.activeEditor.parent instanceof EditorPreviewWidget);
+                assert.isTrue(editorManager.activeEditor.isPreview);
                 assert.equal(activeEditor.uri.toString(), inversifyUri.toString());
                 // export { |Container } from "./container/container";
                 // @ts-ignore
@@ -356,7 +354,7 @@ module.exports = (port, host, argv) => Promise.resolve()
 
                 const activeEditor = /** @type {MonacoEditor} */ (MonacoEditor.get(editorManager.activeEditor));
                 // @ts-ignore
-                assert.equal(editorManager.activeEditor.parent instanceof EditorPreviewWidget, preview);
+                assert.equal(editorManager.activeEditor.isPreview, preview);
                 assert.equal(activeEditor.uri.toString(), serverUri.toString());
                 // const |container = new Container();
                 // @ts-ignore
@@ -382,7 +380,7 @@ module.exports = (port, host, argv) => Promise.resolve()
 
                 const activeEditor = /** @type {MonacoEditor} */ (MonacoEditor.get(editorManager.activeEditor));
                 // @ts-ignore
-                assert.isFalse(editorManager.activeEditor.parent instanceof EditorPreviewWidget);
+                assert.isFalse(editorManager.activeEditor.isPreview);
                 assert.equal(activeEditor.uri.toString(), inversifyUri.toString());
                 // export { |Container } from "./container/container";
                 // @ts-ignore
@@ -406,7 +404,7 @@ module.exports = (port, host, argv) => Promise.resolve()
 
                 const activeEditor = /** @type {MonacoEditor} */ (MonacoEditor.get(editorManager.activeEditor));
                 // @ts-ignore
-                assert.isTrue(editorManager.activeEditor.parent instanceof EditorPreviewWidget);
+                assert.isTrue(editorManager.activeEditor.isPreview);
                 assert.equal(activeEditor.uri.toString(), inversifyUri.toString());
                 // export { |Container } from "./container/container";
                 // @ts-ignore
@@ -463,7 +461,7 @@ module.exports = (port, host, argv) => Promise.resolve()
 
         const suggest = editor.getControl()._contributions['editor.contrib.suggestController'];
         const getFocusedLabel = () => {
-            const focusedItem = suggest.widget.getValue().getFocusedItem();
+            const focusedItem = suggest.widget.value.getFocusedItem();
             return focusedItem && focusedItem.item.completion.label;
         };
 
@@ -572,15 +570,15 @@ module.exports = (port, host, argv) => Promise.resolve()
         const hover = editor.getControl()._contributions['editor.contrib.hover'];
 
         assert.isTrue(contextKeyService.match('editorTextFocus'));
-        assert.isFalse(hover.contentWidget.isVisible);
+        assert.isFalse(!!hover._contentWidget && hover._contentWidget._isVisible);
 
         await commands.executeCommand('editor.action.showHover');
-        await waitForAnimation(() => hover.contentWidget.isVisible);
+        await waitForAnimation(() => !!hover._contentWidget && hover._contentWidget._isVisible);
 
         assert.isTrue(contextKeyService.match('editorTextFocus'));
-        assert.isTrue(hover.contentWidget.isVisible);
+        assert.isTrue(!!hover._contentWidget && hover._contentWidget._isVisible);
 
-        assert.deepEqual(nodeAsString(hover.contentWidget._domNode), `
+        assert.deepEqual(hover._contentWidget && nodeAsString(hover._contentWidget._hover.contentsDomNode), `
 DIV {
   DIV {
     DIV {
@@ -613,10 +611,10 @@ DIV {
 `);
 
         keybindings.dispatchKeyDown('Escape');
-        await waitForAnimation(() => !hover.contentWidget.isVisible);
+        await waitForAnimation(() => !hover._contentWidget || !hover._contentWidget._isVisible);
 
         assert.isTrue(contextKeyService.match('editorTextFocus'));
-        assert.isFalse(hover.contentWidget.isVisible);
+        assert.isFalse(!!hover._contentWidget && hover._contentWidget._isVisible);
     });
 
     it('highligh semantic (write) occurrences', async function () {
@@ -709,8 +707,17 @@ DIV {
             forceMoveMarkers: false,
             text: 'export '
         }]);
-        editor.getControl().revealPosition(position);
         await preferences.set('javascript.referencesCodeLens.enabled', true, PreferenceScope.User);
+
+        // Recall `applyEdits` to workaround `vscode` bug, See: https://github.com/eclipse-theia/theia/issues/9714#issuecomment-876582947.
+        // @ts-ignore
+        editor.getControl().getModel().applyEdits([{
+            range: monaco.Range.fromPositions(position, position),
+            forceMoveMarkers: false,
+            text: ' '
+        }]);
+
+        editor.getControl().revealPosition(position);
         await waitForAnimation(() => codeLensNodeVisible());
 
         assert.isTrue(codeLensNodeVisible());
@@ -725,7 +732,7 @@ SPAN {
 `);
             const link = node.getElementsByTagName('a').item(0);
             if (link) {
-                link.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+                link.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
                 await assertPeekOpened(editor);
                 await closePeek(editor);
             } else {
@@ -737,17 +744,25 @@ SPAN {
     });
 
     it('editor.action.quickFix', async function () {
-        const column = 6;
-        const lineNumber = 19;
+        const column = 29;
+        const lineNumber = 18;
         const editor = await openEditor(serverUri);
-        // @ts-ignore
         const currentChar = () => editor.getControl().getModel().getLineContent(lineNumber).charAt(column - 1);
 
-        // missing semicolon at
-        //     )|
+        // container.load(modul)
+        editor.getControl().getModel().applyEdits([{
+            range: {
+                startLineNumber: lineNumber,
+                endLineNumber: lineNumber,
+                startColumn: 29,
+                endColumn: 30
+            },
+            forceMoveMarkers: false,
+            text: ''
+        }]);
         editor.getControl().setPosition({ lineNumber, column });
         editor.getControl().revealPosition({ lineNumber, column });
-        assert.equal(currentChar(), '');
+        assert.equal(currentChar(), ')');
 
         const quickFixController = editor.getControl()._contributions['editor.contrib.quickFixController'];
         const lightBulbNode = () => {
@@ -770,8 +785,8 @@ SPAN {
         keybindings.dispatchKeyDown('ArrowDown');
         keybindings.dispatchKeyDown('Enter');
 
-        await waitForAnimation(() => currentChar() === ';');
-        assert.equal(currentChar(), ';');
+        await waitForAnimation(() => currentChar() === 'e');
+        assert.equal(currentChar(), 'e');
 
         await waitForAnimation(() => !lightBulbVisible());
         assert.isFalse(lightBulbVisible());

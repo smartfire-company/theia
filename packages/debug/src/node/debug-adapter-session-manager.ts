@@ -20,7 +20,7 @@ import { MessagingService } from '@theia/core/lib/node/messaging/messaging-servi
 
 import { DebugAdapterPath } from '../common/debug-service';
 import { DebugConfiguration } from '../common/debug-configuration';
-import { DebugAdapterSession, DebugAdapterSessionFactory, DebugAdapterFactory } from '../common/debug-model';
+import { DebugAdapterSession, DebugAdapterSessionFactory, DebugAdapterFactory } from './debug-model';
 import { DebugAdapterContributionRegistry } from './debug-adapter-contribution-registry';
 
 /**
@@ -67,6 +67,14 @@ export class DebugAdapterSessionManager implements MessagingService.Contribution
         const sessionFactory = registry.debugAdapterSessionFactory(config.type) || this.debugAdapterSessionFactory;
         const session = sessionFactory.get(sessionId, communicationProvider);
         this.sessions.set(sessionId, session);
+
+        if (config.parentSession) {
+            const parentSession = this.sessions.get(config.parentSession.id);
+            if (parentSession) {
+                session.parentSession = parentSession;
+            }
+        }
+
         return session;
     }
 

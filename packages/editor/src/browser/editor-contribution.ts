@@ -16,20 +16,19 @@
 
 import { EditorManager } from './editor-manager';
 import { TextEditor } from './editor';
-import { injectable, inject } from '@theia/core/shared/inversify';
+import { injectable, inject, optional } from '@theia/core/shared/inversify';
 import { StatusBarAlignment, StatusBar } from '@theia/core/lib/browser/status-bar/status-bar';
-import { FrontendApplicationContribution, DiffUris, DockLayout } from '@theia/core/lib/browser';
+import { FrontendApplicationContribution, DiffUris, DockLayout, QuickInputService } from '@theia/core/lib/browser';
 import { ContextKeyService } from '@theia/core/lib/browser/context-key-service';
 import { CommandHandler, DisposableCollection } from '@theia/core';
 import { EditorCommands } from './editor-command';
-import { EditorQuickOpenService } from './editor-quick-open-service';
 import { CommandRegistry, CommandContribution } from '@theia/core/lib/common';
-import { KeybindingRegistry, KeybindingContribution, QuickOpenContribution, QuickOpenHandlerRegistry } from '@theia/core/lib/browser';
+import { KeybindingRegistry, KeybindingContribution } from '@theia/core/lib/browser';
 import { LanguageService } from '@theia/core/lib/browser/language-service';
 import { SUPPORTED_ENCODINGS } from '@theia/core/lib/browser/supported-encodings';
 
 @injectable()
-export class EditorContribution implements FrontendApplicationContribution, CommandContribution, KeybindingContribution, QuickOpenContribution {
+export class EditorContribution implements FrontendApplicationContribution, CommandContribution, KeybindingContribution {
 
     @inject(StatusBar) protected readonly statusBar: StatusBar;
     @inject(EditorManager) protected readonly editorManager: EditorManager;
@@ -38,8 +37,8 @@ export class EditorContribution implements FrontendApplicationContribution, Comm
     @inject(ContextKeyService)
     protected readonly contextKeyService: ContextKeyService;
 
-    @inject(EditorQuickOpenService)
-    protected readonly editorQuickOpenService: EditorQuickOpenService;
+    @inject(QuickInputService) @optional()
+    protected readonly quickInputService: QuickInputService;
 
     onStart(): void {
         this.initEditorContextKeys();
@@ -131,7 +130,7 @@ export class EditorContribution implements FrontendApplicationContribution, Comm
 
     registerCommands(commands: CommandRegistry): void {
         commands.registerCommand(EditorCommands.SHOW_ALL_OPENED_EDITORS, {
-            execute: () => this.editorQuickOpenService.open()
+            execute: () => this.quickInputService?.open('edt ')
         });
         const splitHandlerFactory = (splitMode: DockLayout.InsertMode): CommandHandler => ({
             isEnabled: () => !!this.editorManager.currentEditor,
@@ -167,9 +166,5 @@ export class EditorContribution implements FrontendApplicationContribution, Comm
             command: EditorCommands.SPLIT_EDITOR_VERTICAL.id,
             keybinding: 'ctrlcmd+k ctrlcmd+\\',
         });
-    }
-
-    registerQuickOpenHandlers(handlers: QuickOpenHandlerRegistry): void {
-        handlers.registerHandler(this.editorQuickOpenService);
     }
 }

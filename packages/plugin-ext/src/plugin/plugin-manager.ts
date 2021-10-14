@@ -30,15 +30,16 @@ import {
 } from '../common/plugin-api-rpc';
 import { PluginMetadata, PluginJsonValidationContribution } from '../common/plugin-protocol';
 import * as theia from '@theia/plugin';
-import { join } from 'path';
+import { join } from './path';
 import { EnvExtImpl } from './env';
 import { PreferenceRegistryExtImpl } from './preference-registry';
-import { Memento, KeyValueStorageProxy } from './plugin-storage';
+import { Memento, KeyValueStorageProxy, GlobalState } from './plugin-storage';
 import { ExtPluginApi } from '../common/plugin-ext-api-contribution';
 import { RPCProtocol } from '../common/rpc-protocol';
 import { Emitter } from '@theia/core/lib/common/event';
 import { WebviewsExtImpl } from './webviews';
 import { URI as Uri } from './types-impl';
+import { SecretsExtImpl, SecretStorageExt } from '../plugin/secrets-ext';
 
 export interface PluginHost {
 
@@ -78,7 +79,11 @@ export class PluginManagerExtImpl implements PluginManagerExt, PluginManager {
         '*',
         'onLanguage',
         'onCommand',
-        'onDebug', 'onDebugInitialConfigurations', 'onDebugResolve', 'onDebugAdapterProtocolTracker',
+        'onDebug',
+        'onDebugInitialConfigurations',
+        'onDebugResolve',
+        'onDebugAdapterProtocolTracker',
+        'onDebugDynamicConfigurations',
         'workspaceContains',
         'onView',
         'onUri',
@@ -111,6 +116,7 @@ export class PluginManagerExtImpl implements PluginManagerExt, PluginManager {
         private readonly envExt: EnvExtImpl,
         private readonly terminalService: TerminalServiceExt,
         private readonly storageProxy: KeyValueStorageProxy,
+        private readonly secrets: SecretsExtImpl,
         private readonly preferencesManager: PreferenceRegistryExtImpl,
         private readonly webview: WebviewsExtImpl,
         private readonly rpc: RPCProtocol
@@ -320,6 +326,23 @@ export class PluginManagerExtImpl implements PluginManagerExt, PluginManager {
     }
 
     async $activateByEvent(activationEvent: string): Promise<void> {
+        if (activationEvent.endsWith(':*')) {
+            const baseEvent = activationEvent.substring(0, activationEvent.length - 2);
+            await this.activateByBaseEvent(baseEvent);
+        } else {
+            await this.activateBySingleEvent(activationEvent);
+        }
+    }
+
+    protected async activateByBaseEvent(baseEvent: string): Promise<void> {
+        await Promise.all(Array.from(this.activations.keys(), activation => {
+            if (activation.startsWith(baseEvent)) {
+                return this.activateBySingleEvent(activation);
+            }
+        }));
+    }
+
+    protected async activateBySingleEvent(activationEvent: string): Promise<void> {
         const activations = this.activations.get(activationEvent);
         if (!activations) {
             return;
@@ -345,20 +368,23 @@ export class PluginManagerExtImpl implements PluginManagerExt, PluginManager {
         const asAbsolutePath = (relativePath: string): string => join(plugin.pluginFolder, relativePath);
         const logPath = join(configStorage.hostLogPath, plugin.model.id); // todo check format
         const storagePath = configStorage.hostStoragePath ? join(configStorage.hostStoragePath, plugin.model.id) : undefined;
+        const secrets = new SecretStorageExt(plugin, this.secrets);
         const globalStoragePath = join(configStorage.hostGlobalStoragePath, plugin.model.id);
         const pluginContext: theia.PluginContext = {
             extensionPath: plugin.pluginFolder,
             extensionUri: Uri.file(plugin.pluginFolder),
-            globalState: new Memento(plugin.model.id, true, this.storageProxy),
+            globalState: new GlobalState(plugin.model.id, true, this.storageProxy),
             workspaceState: new Memento(plugin.model.id, false, this.storageProxy),
             subscriptions: subscriptions,
             asAbsolutePath: asAbsolutePath,
             logPath: logPath,
             storagePath: storagePath,
             storageUri: storagePath ? Uri.file(storagePath) : undefined,
+            secrets,
             globalStoragePath: globalStoragePath,
             globalStorageUri: Uri.file(globalStoragePath),
-            environmentVariableCollection: this.terminalService.getEnvironmentVariableCollection(plugin.model.id)
+            environmentVariableCollection: this.terminalService.getEnvironmentVariableCollection(plugin.model.id),
+            extensionMode: 1 // @todo: implement proper `extensionMode`.
         };
         this.pluginContextsMap.set(plugin.model.id, pluginContext);
 

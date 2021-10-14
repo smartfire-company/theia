@@ -137,7 +137,7 @@ export class DebugVariable extends ExpressionContainer {
     constructor(
         session: DebugSessionProvider,
         protected readonly variable: DebugProtocol.Variable,
-        protected readonly parent: ExpressionContainer
+        readonly parent: ExpressionContainer
     ) {
         super({
             session,
@@ -232,6 +232,9 @@ export class DebugVariable extends ExpressionContainer {
     protected setNameRef = (nameRef: HTMLSpanElement | null) => this.nameRef = nameRef || undefined;
 
     async open(): Promise<void> {
+        if (!this.supportSetVariable) {
+            return;
+        }
         const input = new SingleTextInputDialog({
             title: `Set ${this.name} Value`,
             initialValue: this.value
@@ -356,7 +359,7 @@ export class DebugScope extends ExpressionContainer {
     }
 
     render(): React.ReactNode {
-        return this.raw.name;
+        return this.name;
     }
 
     get expensive(): boolean {
@@ -369,6 +372,10 @@ export class DebugScope extends ExpressionContainer {
             return new monaco.Range(line, column, endLine, endColumn);
         }
         return undefined;
+    }
+
+    get name(): string {
+        return this.raw.name;
     }
 
 }

@@ -16,6 +16,7 @@
 
 import { interfaces } from 'inversify';
 import { createPreferenceProxy, PreferenceContribution, PreferenceProxy, PreferenceSchema, PreferenceService } from '../../browser/preferences';
+import { isOSX, isWindows } from '../../common';
 
 export namespace ZoomLevel {
     export const DEFAULT = 0;
@@ -38,25 +39,41 @@ export const electronWindowPreferencesSchema: PreferenceSchema = {
             // eslint-disable-next-line max-len
             'description': 'Adjust the zoom level of the window. The original size is 0 and each increment above (e.g. 1.0) or below (e.g. -1.0) represents zooming 20% larger or smaller. You can also enter decimals to adjust the zoom level with a finer granularity.'
         },
+        'window.titleBarStyle': {
+            type: 'string',
+            enum: ['native', 'custom'],
+            markdownEnumDescriptions: [
+                'Native title bar is displayed.',
+                'Custom title bar is displayed.'
+            ],
+            default: isWindows ? 'custom' : 'native',
+            scope: 'application',
+            // eslint-disable-next-line max-len
+            markdownDescription: 'Adjust the appearance of the window title bar. On Linux and Windows, this setting also affects the application and context menu appearances. Changes require a full restart to apply.',
+            included: !isOSX
+        },
     }
 };
 
 export class ElectronWindowConfiguration {
     'window.zoomLevel': number;
+    'window.titleBarStyle': 'native' | 'custom';
 }
 
+export const ElectronWindowPreferenceContribution = Symbol('ElectronWindowPreferenceContribution');
 export const ElectronWindowPreferences = Symbol('ElectronWindowPreferences');
 export type ElectronWindowPreferences = PreferenceProxy<ElectronWindowConfiguration>;
 
-export function createElectronWindowPreferences(preferences: PreferenceService): ElectronWindowPreferences {
-    return createPreferenceProxy(preferences, electronWindowPreferencesSchema);
+export function createElectronWindowPreferences(preferences: PreferenceService, schema: PreferenceSchema = electronWindowPreferencesSchema): ElectronWindowPreferences {
+    return createPreferenceProxy(preferences, schema);
 }
 
 export function bindWindowPreferences(bind: interfaces.Bind): void {
     bind(ElectronWindowPreferences).toDynamicValue(ctx => {
         const preferences = ctx.container.get<PreferenceService>(PreferenceService);
-        return createElectronWindowPreferences(preferences);
+        const contribution = ctx.container.get<PreferenceContribution>(ElectronWindowPreferenceContribution);
+        return createElectronWindowPreferences(preferences, contribution.schema);
     }).inSingletonScope();
-
-    bind(PreferenceContribution).toConstantValue({ schema: electronWindowPreferencesSchema });
+    bind(ElectronWindowPreferenceContribution).toConstantValue({ schema: electronWindowPreferencesSchema });
+    bind(PreferenceContribution).toService(ElectronWindowPreferenceContribution);
 }

@@ -35,7 +35,7 @@ const platform = {
     isLinux: OS.type() === OS.Type.Linux
 };
 
-// should be in sync with https://github.com/theia-ide/vscode/blob/standalone/0.20.x/src/vs/editor/common/config/editorOptions.ts#L3042
+// should be in sync with https://github.com/theia-ide/vscode/blob/standalone/0.23.x/src/vs/editor/common/config/editorOptions.ts#L3687
 export const EDITOR_FONT_DEFAULTS = {
     fontFamily: (
         isOSX ? DEFAULT_MAC_FONT_FAMILY : (isWindows ? DEFAULT_WINDOWS_FONT_FAMILY : DEFAULT_LINUX_FONT_FAMILY)
@@ -48,7 +48,7 @@ export const EDITOR_FONT_DEFAULTS = {
     letterSpacing: 0,
 };
 
-// should be in sync with https://github.com/theia-ide/vscode/blob/standalone/0.20.x/src/vs/editor/common/config/editorOptions.ts#L3057
+// should be in sync with https://github.com/theia-ide/vscode/blob/standalone/0.23.x/src/vs/editor/common/config/editorOptions.ts#L3702
 export const EDITOR_MODEL_DEFAULTS = {
     tabSize: 4,
     indentSize: 4,
@@ -64,11 +64,11 @@ export const DEFAULT_WORD_SEPARATORS = '`~!@#$%^&*()-=+[{]}\\|;:\'",.<>/?';
 /* eslint-disable no-null/no-null */
 
 // should be in sync with:
-//        1. https://github.com/theia-ide/vscode/blob/standalone/0.20.x/src/vs/editor/common/config/commonEditorConfig.ts#L441
-//        2. https://github.com/theia-ide/vscode/blob/standalone/0.20.x/src/vs/editor/common/config/commonEditorConfig.ts#L530
+//        1. https://github.com/theia-ide/vscode/blob/standalone/0.23.x/src/vs/editor/common/config/commonEditorConfig.ts#L458
+//        2. https://github.com/theia-ide/vscode/blob/standalone/0.23.x/src/vs/editor/common/config/commonEditorConfig.ts#L577
 
-// 1. Copy from https://github.com/theia-ide/vscode/blob/standalone/0.20.x/src/vs/editor/common/config/commonEditorConfig.ts#L530
-// 2. Align first items with https://github.com/theia-ide/vscode/blob/standalone/0.20.x/src/vs/editor/common/config/commonEditorConfig.ts#L441
+// 1. Copy from https://github.com/theia-ide/vscode/blob/standalone/0.23.x/src/vs/editor/common/config/commonEditorConfig.ts#L577
+// 2. Align first items with https://github.com/theia-ide/vscode/blob/standalone/0.23.x/src/vs/editor/common/config/commonEditorConfig.ts#L458
 // 3. Find -> Use Regular Expressions to clean up data and replace " by ', for example -> nls\.localize\(.*, "(.*)"\) -> "$1"
 // 4. Apply `quotemark` quick fixes
 // 5. Fix the rest manually
@@ -82,7 +82,7 @@ const codeEditorPreferenceProperties = {
     'editor.defaultFormatter': {
         'type': 'string',
         'default': null,
-        'description': 'Default formatter'
+        'description': 'Default formatter.'
     },
     'editor.insertSpaces': {
         'type': 'boolean',
@@ -109,9 +109,24 @@ const codeEditorPreferenceProperties = {
         'default': true,
         'description': 'Controls whether completions should be computed based on words in the document.'
     },
+    'editor.wordBasedSuggestionsMode': {
+        'enum': ['currentDocument', 'matchingDocuments', 'allDocuments'],
+        'default': 'matchingDocuments',
+        'enumDescriptions': [
+            'Only suggest words from the active document.',
+            'Suggest words from all open documents of the same language.',
+            'Suggest words from all open documents.'
+        ],
+        'description': 'Controls form what documents word based completions are computed.'
+    },
     'editor.semanticHighlighting.enabled': {
-        'type': 'boolean',
-        'default': true,
+        'enum': [true, false, 'configuredByTheme'],
+        'enumDescriptions': [
+            'Semantic highlighting enabled for all color themes.',
+            'Semantic highlighting disabled for all color themes.',
+            'Semantic highlighting is configured by the current color theme\'s `semanticHighlighting` setting.'
+        ],
+        'default': 'configuredByTheme',
         'description': 'Controls whether the semanticHighlighting is shown for the languages that support it.'
     },
     'editor.stablePeek': {
@@ -122,7 +137,7 @@ const codeEditorPreferenceProperties = {
     'editor.maxTokenizationLineLength': {
         'type': 'integer',
         'default': 400,
-        'description': 'Lines above this length will not be tokenized for performance reasons'
+        'description': 'Lines above this length will not be tokenized for performance reasons.'
     },
     'diffEditor.maxComputationTime': {
         'type': 'number',
@@ -137,12 +152,27 @@ const codeEditorPreferenceProperties = {
     'diffEditor.ignoreTrimWhitespace': {
         'type': 'boolean',
         'default': true,
-        'description': 'Controls whether the diff editor shows changes in leading or trailing whitespace as diffs.'
+        'description': 'When enabled, the diff editor ignores changes in leading or trailing whitespace.'
     },
     'diffEditor.renderIndicators': {
         'type': 'boolean',
         'default': true,
         'description': 'Controls whether the diff editor shows +/- indicators for added/removed changes.'
+    },
+    'diffEditor.codeLens': {
+        'type': 'boolean',
+        'default': false,
+        'description': 'Controls whether the editor shows CodeLens.'
+    },
+    'diffEditor.wordWrap': {
+        'type': 'string',
+        'enum': ['off', 'on', 'inherit'],
+        'default': 'inherit',
+        'markdownEnumDescriptions': [
+            'Lines will never wrap.',
+            'Lines will wrap at the viewport width.',
+            'Lines will wrap according to the `#editor.wordWrap#` setting.'
+        ]
     },
     'editor.acceptSuggestionOnCommitCharacter': {
         'markdownDescription': 'Controls whether suggestions should be accepted on commit characters. For example, in JavaScript, the semi-colon (`;`) can be a commit character that accepts a suggestion and types that character.',
@@ -271,10 +301,32 @@ const codeEditorPreferenceProperties = {
         ],
         'default': 'languageDefined'
     },
+    'editor.ariaLabel': {
+        'type': 'string',
+        'description': 'The aria label for the editor\'s textarea when focused.',
+        'default': 'ariaLabel'
+    },
+    'editor.automaticLayout': {
+        'type': 'boolean',
+        'default': false,
+        'description': 'Enable that the editor will install an interval to check if its container dom node size has changed. Enabling this might have a severe performance impact.'
+    },
     'editor.codeLens': {
         'description': 'Controls whether the editor shows CodeLens.',
         'type': 'boolean',
         'default': true
+    },
+    'editor.codeLensFontFamily': {
+        'description': 'Controls the font family for CodeLens.',
+        'type': 'string',
+        'default': true
+    },
+    'editor.codeLensFontSize': {
+        'type': 'integer',
+        'default': 0,
+        'minimum': 0,
+        'maximum': 100,
+        'description': 'Controls the font size in pixels for CodeLens. When set to `0`, the 90% of `#editor.fontSize#` is used.'
     },
     'editor.colorDecorators': {
         'description': 'Controls whether the editor should render the inline color decorators and color picker.',
@@ -285,6 +337,16 @@ const codeEditorPreferenceProperties = {
         'type': 'boolean',
         'default': true,
         'description': 'Controls whether a space character is inserted when commenting.'
+    },
+    'editor.comments.ignoreEmptyLines': {
+        'type': 'boolean',
+        'default': true,
+        'description': 'Controls if empty lines should be ignored with toggle, add or remove actions for line comments.'
+    },
+    'editor.contextmenu': {
+        'description': 'Controls whether to enable the custom contextmenu.',
+        'type': 'boolean',
+        'default': true,
     },
     'editor.copyWithSyntaxHighlighting': {
         'description': 'Controls whether syntax highlighting should be copied into the clipboard.',
@@ -348,6 +410,16 @@ const codeEditorPreferenceProperties = {
         'minimum': 0,
         'maximum': 1073741824
     },
+    'editor.disableLayerHinting': {
+        'markdownDescription': 'Disable the use of `transform: translate3d(0px, 0px, 0px)` for the editor margin and lines layers. The usage of `transform: translate3d(0px, 0px, 0px)` acts as a hint for browsers to create an extra layer.',
+        'type': 'boolean',
+        'default': false
+    },
+    'editor.disableMonospaceOptimizations': {
+        'description': 'Controls whether to enable optimizations for monospace fonts.',
+        'type': 'boolean',
+        'default': false
+    },
     'editor.dragAndDrop': {
         'description': 'Controls whether the editor should allow moving selections via drag and drop.',
         'type': 'boolean',
@@ -358,10 +430,20 @@ const codeEditorPreferenceProperties = {
         'type': 'boolean',
         'default': true
     },
+    'editor.extraEditorClassName': {
+        'description': 'Additional class name to be added to the editor.',
+        'type': 'string',
+        'default': ''
+    },
     'editor.fastScrollSensitivity': {
         'markdownDescription': 'Scrolling speed multiplier when pressing `Alt`.',
         'type': 'number',
         'default': 5
+    },
+    'editor.find.cursorMoveOnType': {
+        'description': 'Controls whether the cursor should jump to find matches while typing.',
+        'type': 'boolean',
+        'default': true
     },
     'editor.find.seedSearchStringFromSelection': {
         'type': 'boolean',
@@ -394,6 +476,16 @@ const codeEditorPreferenceProperties = {
         'default': true,
         'description': 'Controls whether the Find Widget should add extra lines on top of the editor. When true, you can scroll beyond the first line when the Find Widget is visible.'
     },
+    'editor.find.loop': {
+        'type': 'boolean',
+        'default': true,
+        'description': 'Controls whether the search automatically restarts from the beginning (or the end) when no further matches can be found.'
+    },
+    'editor.fixedOverflowWidgets': {
+        'markdownDescription': 'Controls whether to display overflow widgets as `fixed`.',
+        'type': 'boolean',
+        'default': false,
+    },
     'editor.folding': {
         'description': 'Controls whether the editor has code folding enabled.',
         'type': 'boolean',
@@ -412,6 +504,11 @@ const codeEditorPreferenceProperties = {
         'description': 'Controls whether the editor should highlight folded ranges.',
         'type': 'boolean',
         'default': true
+    },
+    'editor.unfoldOnClickAfterEndOfLine': {
+        'description': 'Controls whether clicking on the empty content after a folded line will unfold the line.',
+        'type': 'boolean',
+        'default': false
     },
     'editor.fontFamily': {
         'description': 'Controls the font family.',
@@ -602,6 +699,10 @@ const codeEditorPreferenceProperties = {
         'default': true,
         'description': 'Controls whether the hover should remain visible when mouse is moved over it.'
     },
+    'editor.inDiffEditor': {
+        'type': 'boolean',
+        'default': true,
+    },
     'editor.letterSpacing': {
         'description': 'Controls the letter spacing in pixels.',
         'type': 'number',
@@ -635,6 +736,18 @@ const codeEditorPreferenceProperties = {
         ],
         'default': 'on',
         'description': 'Controls the display of line numbers.'
+    },
+    'editor.lineNumbersMinChars': {
+        'description': 'Controls the line height. Use 0 to compute the line height from the font size.',
+        'type': 'integer',
+        'default': 5,
+        'minimum': 1,
+        'maximum': 300
+    },
+    'editor.linkedEditing': {
+        'description': 'Controls whether the editor has linked editing enabled. Depending on the language, related symbols, e.g. HTML tags, are updated while editing.',
+        'type': 'boolean',
+        'default': false
     },
     'editor.links': {
         'description': 'Controls whether the editor should detect links and make them clickable.',
@@ -691,6 +804,12 @@ const codeEditorPreferenceProperties = {
         'default': 120,
         'description': 'Limit the width of the minimap to render at most a certain number of columns.'
     },
+    'editor.mouseStyle': {
+        'description': 'Controls the mouse pointer style.',
+        'type': 'string',
+        'enum': ['text', 'default', 'copy'],
+        'default': 'text'
+    },
     'editor.mouseWheelScrollSensitivity': {
         'markdownDescription': 'A multiplier to be used on the `deltaX` and `deltaY` of mouse wheel scroll events.',
         'type': 'number',
@@ -742,6 +861,27 @@ const codeEditorPreferenceProperties = {
         'type': 'boolean',
         'default': true
     },
+    'editor.overviewRulerLanes': {
+        'type': 'integer',
+        'default': 3,
+        'minimum': 0,
+        'maximum': 3,
+        'description': 'The number of vertical lanes the overview ruler should render.'
+    },
+    'editor.padding.top': {
+        'type': 'number',
+        'default': 0,
+        'minimum': 0,
+        'maximum': 1000,
+        'description': 'Controls the amount of space between the top edge of the editor and the first line.'
+    },
+    'editor.padding.bottom': {
+        'type': 'number',
+        'default': 0,
+        'minimum': 0,
+        'maximum': 1000,
+        'description': 'Controls the amount of space between the bottom edge of the editor and the last line.'
+    },
     'editor.parameterHints.enabled': {
         'type': 'boolean',
         'default': true,
@@ -764,6 +904,11 @@ const codeEditorPreferenceProperties = {
             'editor'
         ],
         'default': 'tree'
+    },
+    'editor.definitionLinkOpensInPeek': {
+        'type': 'boolean',
+        'default': false,
+        'description': 'Controls whether the Go to Definition mouse gesture always opens the peek widget.'
     },
     'editor.quickSuggestions': {
         'anyOf': [
@@ -805,6 +950,11 @@ const codeEditorPreferenceProperties = {
         'minimum': 0,
         'maximum': 1073741824
     },
+    'editor.readOnly': {
+        'description': 'Controls whether the editor is readonly.',
+        'type': 'boolean',
+        'default': false
+    },
     'editor.rename.enablePreview': {
         'description': 'Controls whether the editor should display refactor preview pane for rename.',
         'type': 'boolean',
@@ -842,6 +992,17 @@ const codeEditorPreferenceProperties = {
         ],
         'default': 'line'
     },
+    'editor.renderLineHighlightOnlyWhenFocus': {
+        'description': 'Controls if the editor should render the current line highlight only when the editor is focused.',
+        'type': 'boolean',
+        'default': false
+    },
+    'editor.renderValidationDecorations': {
+        'description': 'Controls whether the editor renders validation decorations.',
+        'type': 'string',
+        'enum': ['editable', 'on', 'off'],
+        'default': 'editable'
+    },
     'editor.renderWhitespace': {
         'enumDescriptions': [
             '',
@@ -858,6 +1019,13 @@ const codeEditorPreferenceProperties = {
             'all'
         ],
         'default': 'none'
+    },
+    'editor.revealHorizontalRightPadding': {
+        'description': 'When revealing the cursor, a virtual padding (px) is added to the cursor, turning it into a rectangle. This virtual padding ensures that the cursor gets revealed before hitting the edge of the viewport.',
+        'type': 'integer',
+        'default': 30,
+        'minimum': 0,
+        'maximum': 1000
     },
     'editor.roundedSelection': {
         'description': 'Controls whether selections should have rounded corners.',
@@ -884,6 +1052,11 @@ const codeEditorPreferenceProperties = {
         'type': 'boolean',
         'default': true
     },
+    'editor.scrollPredominantAxis': {
+        'description': 'Scroll only along the predominant axis when scrolling both vertically and horizontally at the same time. Prevents horizontal drift when scrolling vertically on a trackpad.',
+        'type': 'boolean',
+        'default': true
+    },
     'editor.selectionClipboard': {
         'description': 'Controls whether the Linux primary clipboard should be supported.',
         'included': platform.isLinux,
@@ -892,6 +1065,11 @@ const codeEditorPreferenceProperties = {
     },
     'editor.selectionHighlight': {
         'description': 'Controls whether the editor should highlight matches similar to the selection.',
+        'type': 'boolean',
+        'default': true
+    },
+    'editor.selectOnLineNumbers': {
+        'description': 'Controls whether to select the corresponding line when clicking on the line number',
         'type': 'boolean',
         'default': true
     },
@@ -908,6 +1086,26 @@ const codeEditorPreferenceProperties = {
         'description': 'Controls fading out of unused code.',
         'type': 'boolean',
         'default': true
+    },
+    'editor.showDeprecated': {
+        'description': 'Controls strikethrough deprecated variables.',
+        'type': 'boolean',
+        'default': true
+    },
+    'editor.inlineHints.enabled': {
+        'type': 'boolean',
+        'default': true,
+        'description': 'Enables the inline hints in the editor.'
+    },
+    'editor.inlineHints.fontSize': {
+        'type': 'number',
+        'default': EDITOR_FONT_DEFAULTS.fontSize,
+        description: 'Controls font size of inline hints in the editor. When set to `0`, the 90% of `#editor.fontSize#` is used.'
+    },
+    'editor.inlineHints.fontFamily': {
+        'type': 'string',
+        'default': EDITOR_FONT_DEFAULTS.fontFamily,
+        'description': 'Controls font family of inline hints in the editor.'
     },
     'editor.snippetSuggestions': {
         'enumDescriptions': [
@@ -926,10 +1124,27 @@ const codeEditorPreferenceProperties = {
         ],
         'default': 'inline'
     },
+    'editor.smartSelect.selectLeadingAndTrailingWhitespace': {
+        'description': 'Whether leading and trailing whitespace should always be selected.',
+        'default': true,
+        'type': 'boolean'
+    },
     'editor.smoothScrolling': {
         'description': 'Controls whether the editor will scroll using an animation.',
         'type': 'boolean',
         'default': false
+    },
+    'editor.stickyTabStops': {
+        'description': 'Emulate selection behaviour of tab characters when using spaces for indentation. Selection will stick to tab stops.',
+        'type': 'boolean',
+        'default': false
+    },
+    'editor.stopRenderingLineAfter': {
+        'description': 'Performance guard: Stop rendering a line after x characters.',
+        'type': 'integer',
+        'default': 10000,
+        'minimum': -1,
+        'maximum': 1073741824
     },
     'editor.suggest.insertMode': {
         'type': 'string',
@@ -1170,6 +1385,24 @@ const codeEditorPreferenceProperties = {
         ],
         'default': 'off'
     },
+    'editor.tabIndex': {
+        'markdownDescription': 'Controls the wrapping column of the editor when `#editor.wordWrap#` is `wordWrapColumn` or `bounded`.',
+        'type': 'integer',
+        'default': 0,
+        'minimum': -1,
+        'maximum': 1073741824
+    },
+    'editor.unusualLineTerminators': {
+        'markdownEnumDescriptions': [
+            'Unusual line terminators are automatically removed.',
+            'Unusual line terminators are ignored.',
+            'Unusual line terminators prompt to be removed.'
+        ],
+        'description': 'Remove unusual line terminators that might cause problems.',
+        'type': 'string',
+        'enum': ['auto', 'off', 'prompt'],
+        'default': 'prompt'
+    },
     'editor.useTabStops': {
         'description': 'Inserting and deleting whitespace follows tab stops.',
         'type': 'boolean',
@@ -1197,12 +1430,34 @@ const codeEditorPreferenceProperties = {
         ],
         'default': 'off'
     },
+    'editor.wordWrapBreakAfterCharacters': {
+        'description': 'Configure word wrapping characters. A break will be introduced after these characters.',
+        'type': 'string',
+        'default': ' \t})]?|/&.,;¢°′″‰℃、。｡､￠，．：；？！％・･ゝゞヽヾーァィゥェォッャュョヮヵヶぁぃぅぇぉっゃゅょゎゕゖㇰㇱㇲㇳㇴㇵㇶㇷㇸㇹㇺㇻㇼㇽㇾㇿ々〻ｧｨｩｪｫｬｭｮｯｰ”〉》」』】〕）］｝｣',
+    },
+    'editor.wordWrapBreakBeforeCharacters': {
+        'description': 'Configure word wrapping characters. A break will be introduced before these characters.',
+        'type': 'string',
+        'default': '([{‘“〈《「『【〔（［｛｢£¥＄￡￥+＋',
+    },
     'editor.wordWrapColumn': {
         'markdownDescription': 'Controls the wrapping column of the editor when `#editor.wordWrap#` is `wordWrapColumn` or `bounded`.',
         'type': 'integer',
         'default': 80,
         'minimum': 1,
         'maximum': 1073741824
+    },
+    'editor.wordWrapOverride1': {
+        'markdownDescription': 'Override the `wordWrap` setting.',
+        'type': 'string',
+        'enum': ['off', 'on', 'inherit'],
+        'default': 'inherit'
+    },
+    'editor.wordWrapOverride2': {
+        'markdownDescription': 'Override the `wordWrapOverride1` setting.',
+        'type': 'string',
+        'enum': ['off', 'on', 'inherit'],
+        'default': 'inherit'
     },
     'editor.wrappingIndent': {
         'enumDescriptions': [
@@ -1311,18 +1566,20 @@ export type EndOfLinePreference = '\n' | '\r\n' | 'auto';
 
 export type EditorPreferenceChange = PreferenceChangeEvent<EditorConfiguration>;
 
+export const EditorPreferenceContribution = Symbol('EditorPreferenceContribution');
 export const EditorPreferences = Symbol('EditorPreferences');
 export type EditorPreferences = PreferenceProxy<EditorConfiguration>;
 
-export function createEditorPreferences(preferences: PreferenceService): EditorPreferences {
-    return createPreferenceProxy(preferences, editorPreferenceSchema);
+export function createEditorPreferences(preferences: PreferenceService, schema: PreferenceSchema = editorPreferenceSchema): EditorPreferences {
+    return createPreferenceProxy(preferences, schema);
 }
 
 export function bindEditorPreferences(bind: interfaces.Bind): void {
     bind(EditorPreferences).toDynamicValue(ctx => {
         const preferences = ctx.container.get<PreferenceService>(PreferenceService);
-        return createEditorPreferences(preferences);
+        const contribution = ctx.container.get<PreferenceContribution>(EditorPreferenceContribution);
+        return createEditorPreferences(preferences, contribution.schema);
     }).inSingletonScope();
-
-    bind(PreferenceContribution).toConstantValue({ schema: editorPreferenceSchema });
+    bind(EditorPreferenceContribution).toConstantValue({ schema: editorPreferenceSchema });
+    bind(PreferenceContribution).toService(EditorPreferenceContribution);
 }

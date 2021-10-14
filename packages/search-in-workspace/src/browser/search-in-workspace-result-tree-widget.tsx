@@ -28,7 +28,9 @@ import {
     TreeProps,
     TreeExpansionService,
     ApplicationShell,
-    DiffUris
+    DiffUris,
+    TREE_NODE_INFO_CLASS,
+    codicon
 } from '@theia/core/lib/browser';
 import { CancellationTokenSource, Emitter, Event } from '@theia/core';
 import {
@@ -40,7 +42,7 @@ import { FileResourceResolver, FileSystemPreferences } from '@theia/filesystem/l
 import { FileService } from '@theia/filesystem/lib/browser/file-service';
 import { SearchInWorkspaceResult, SearchInWorkspaceOptions, SearchMatch } from '../common/search-in-workspace-interface';
 import { SearchInWorkspaceService } from './search-in-workspace-service';
-import { MEMORY_TEXT } from './in-memory-text-resource';
+import { MEMORY_TEXT } from '@theia/core/lib/common';
 import URI from '@theia/core/lib/common/uri';
 import * as React from '@theia/core/shared/react';
 import { SearchInWorkspacePreferences } from './search-in-workspace-preferences';
@@ -128,6 +130,10 @@ export class SearchInWorkspaceResultTreeWidget extends TreeWidget {
     cancelIndicator?: CancellationTokenSource;
 
     protected changeEmitter = new Emitter<Map<string, SearchInWorkspaceRootFolderNode>>();
+
+    protected onExpansionChangedEmitter = new Emitter();
+    readonly onExpansionChanged: Event<void> = this.onExpansionChangedEmitter.event;
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     protected focusInputEmitter = new Emitter<any>();
 
@@ -202,6 +208,10 @@ export class SearchInWorkspaceResultTreeWidget extends TreeWidget {
                 this.model.refresh();
             }
         }));
+
+        this.toDispose.push(this.model.onExpansionChanged(() => {
+            this.onExpansionChangedEmitter.fire(undefined);
+        }));
     }
 
     get fileNumber(): number {
@@ -222,6 +232,10 @@ export class SearchInWorkspaceResultTreeWidget extends TreeWidget {
         this.update();
     }
 
+    get isReplacing(): boolean {
+        return this._replaceTerm !== '' && this._showReplaceButtons;
+    }
+
     get onChange(): Event<Map<string, SearchInWorkspaceRootFolderNode>> {
         return this.changeEmitter.event;
     }
@@ -231,12 +245,36 @@ export class SearchInWorkspaceResultTreeWidget extends TreeWidget {
     }
 
     collapseAll(): void {
-        this.resultTree.forEach(rootFolderNode => {
-            rootFolderNode.children.forEach(fileNode => this.expansionService.collapseNode(fileNode));
+        for (const rootFolderNode of this.resultTree.values()) {
+            for (const fileNode of rootFolderNode.children) {
+                this.expansionService.collapseNode(fileNode);
+            }
             if (rootFolderNode.visible) {
                 this.expansionService.collapseNode(rootFolderNode);
             }
-        });
+        }
+    }
+
+    expandAll(): void {
+        for (const rootFolderNode of this.resultTree.values()) {
+            for (const fileNode of rootFolderNode.children) {
+                this.expansionService.expandNode(fileNode);
+            }
+            if (rootFolderNode.visible) {
+                this.expansionService.expandNode(rootFolderNode);
+            }
+        }
+    }
+
+    areResultsCollapsed(): boolean {
+        for (const rootFolderNode of this.resultTree.values()) {
+            for (const fileNode of rootFolderNode.children) {
+                if (!ExpandableTreeNode.isCollapsed(fileNode)) {
+                    return false;
+                }
+            }
+        }
+        return true;
     }
 
     /**
@@ -817,7 +855,7 @@ export class SearchInWorkspaceResultTreeWidget extends TreeWidget {
     }
 
     protected renderRemoveButton(node: TreeNode): React.ReactNode {
-        return <span className='remove-node' onClick={e => this.remove(node, e)} title='Dismiss'></span>;
+        return <span className={codicon('close')} onClick={e => this.remove(node, e)} title='Dismiss'></span>;
     }
 
     protected removeNode(node: TreeNode): void {
@@ -872,7 +910,7 @@ export class SearchInWorkspaceResultTreeWidget extends TreeWidget {
                             {this.toNodeName(node)}
                         </span>
                         {node.path !== '/' + this.defaultRootName &&
-                            <span className={'file-path'}>
+                            <span className={'file-path ' + TREE_NODE_INFO_CLASS}>
                                 {node.path}
                             </span>
                         }
@@ -897,7 +935,7 @@ export class SearchInWorkspaceResultTreeWidget extends TreeWidget {
                         <span className={'file-name'}>
                             {this.toNodeName(node)}
                         </span>
-                        <span className={'file-path'}>
+                        <span className={'file-path ' + TREE_NODE_INFO_CLASS}>
                             {node.path}
                         </span>
                     </div>
@@ -938,8 +976,8 @@ export class SearchInWorkspaceResultTreeWidget extends TreeWidget {
     }
 
     protected renderMatchLinePart(node: SearchInWorkspaceResultLineNode): React.ReactNode {
-        const replaceTerm = this._replaceTerm !== '' && this._showReplaceButtons ? <span className='replace-term'>{this._replaceTerm}</span> : '';
-        const className = `match${this._showReplaceButtons ? ' strike-through' : ''}`;
+        const replaceTerm = this.isReplacing ? <span className='replace-term'>{this._replaceTerm}</span> : '';
+        const className = `match${this.isReplacing ? ' strike-through' : ''}`;
         const match = typeof node.lineText === 'string' ?
             node.lineText.substr(node.character - 1, node.length)
             : node.lineText.text.substr(node.lineText.character - 1, node.length);
@@ -963,7 +1001,7 @@ export class SearchInWorkspaceResultTreeWidget extends TreeWidget {
     protected async doOpen(node: SearchInWorkspaceResultLineNode, preview: boolean = false): Promise<EditorWidget> {
         let fileUri: URI;
         const resultNode = node.parent;
-        if (resultNode && this._showReplaceButtons && preview) {
+        if (resultNode && this.isReplacing && preview) {
             const leftUri = new URI(node.fileUri);
             const rightUri = await this.createReplacePreview(resultNode);
             fileUri = DiffUris.encode(leftUri, rightUri);
@@ -971,7 +1009,7 @@ export class SearchInWorkspaceResultTreeWidget extends TreeWidget {
             fileUri = new URI(node.fileUri);
         }
 
-        const opts: EditorOpenerOptions | undefined = !DiffUris.isDiffUri(fileUri) ? {
+        const opts: EditorOpenerOptions = {
             selection: {
                 start: {
                     line: node.line - 1,
@@ -983,7 +1021,7 @@ export class SearchInWorkspaceResultTreeWidget extends TreeWidget {
                 }
             },
             mode: 'reveal'
-        } : undefined;
+        };
 
         const editorWidget = await this.editorManager.open(fileUri, opts);
 
@@ -1070,7 +1108,7 @@ export class SearchInWorkspaceResultTreeWidget extends TreeWidget {
     protected getExcludeGlobs(excludeOptions?: string[]): string[] {
         const excludePreferences = this.filesystemPreferences['files.exclude'];
         const excludePreferencesGlobs = Object.keys(excludePreferences).filter(key => !!excludePreferences[key]);
-        return [...new Set([...excludePreferencesGlobs, ...excludeOptions])];
+        return [...new Set([...excludePreferencesGlobs, ...excludeOptions || []])];
     }
 
     /**

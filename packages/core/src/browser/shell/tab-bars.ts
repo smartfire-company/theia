@@ -20,7 +20,7 @@ import { VirtualElement, h, VirtualDOM, ElementInlineStyle } from '@phosphor/vir
 import { Disposable, DisposableCollection, MenuPath, notEmpty } from '../../common';
 import { ContextMenuRenderer } from '../context-menu-renderer';
 import { Signal, Slot } from '@phosphor/signaling';
-import { Message } from '@phosphor/messaging';
+import { Message, MessageLoop } from '@phosphor/messaging';
 import { ArrayExt } from '@phosphor/algorithm';
 import { ElementExt } from '@phosphor/domutils';
 import { TabBarToolbarRegistry, TabBarToolbar } from './tab-bar-toolbar';
@@ -28,6 +28,9 @@ import { TheiaDockPanel, MAIN_AREA_ID, BOTTOM_AREA_ID } from './theia-dock-panel
 import { WidgetDecoration } from '../widget-decoration';
 import { TabBarDecoratorService } from './tab-bar-decorator';
 import { IconThemeService } from '../icon-theme-service';
+import { BreadcrumbsRenderer, BreadcrumbsRendererFactory } from '../breadcrumbs/breadcrumbs-renderer';
+import { NavigatableWidget } from '../navigatable-types';
+import { IDragEvent } from '@phosphor/dragdrop';
 
 /** The class name added to hidden content nodes, which are required to render vertical side bars. */
 const HIDDEN_CONTENT_CLASS = 'theia-TabBar-hidden-content';
@@ -227,11 +230,11 @@ export class TabBarRenderer extends TabBar.Renderer {
     }
 
     renderBadge(data: SideBarRenderData, isInSidePanel?: boolean): VirtualElement {
-        const badge: number | undefined = this.getDecorationData(data.title, 'badge')[0];
-        if (!badge) {
+        const totalBadge = this.getDecorationData(data.title, 'badge').reduce((sum, badge) => sum! + badge!, 0);
+        if (!totalBadge) {
             return h.div({});
         }
-        const limitedBadge = badge >= 100 ? '99+' : badge;
+        const limitedBadge = totalBadge >= 100 ? '99+' : totalBadge;
         return isInSidePanel
             ? h.div({ className: 'theia-badge-decorator-sidebar' }, `${limitedBadge}`)
             : h.div({ className: 'theia-badge-decorator-horizontal' }, `${limitedBadge}`);
@@ -277,7 +280,6 @@ export class TabBarRenderer extends TabBar.Renderer {
      */
     protected getDecorationData<K extends keyof WidgetDecoration.Data>(title: Title<Widget>, key: K): WidgetDecoration.Data[K][] {
         return this.getDecorations(title).filter(data => data[key] !== undefined).map(data => data[key]);
-
     }
 
     /**
@@ -381,8 +383,8 @@ export class TabBarRenderer extends TabBar.Renderer {
      * @param {SideBarRenderData} data Data used to render the tab icon.
      * @param {boolean} isInSidePanel An optional check which determines if the tab is in the side-panel.
      */
-    renderIcon(data: SideBarRenderData, inSidePanel?: boolean): VirtualElement {
-        if (!inSidePanel && this.iconThemeService && this.iconThemeService.current === 'none') {
+    renderIcon(data: SideBarRenderData, isInSidePanel?: boolean): VirtualElement {
+        if (!isInSidePanel && this.iconThemeService && this.iconThemeService.current === 'none') {
             return h.div();
         }
         let top: string | undefined;
@@ -399,13 +401,13 @@ export class TabBarRenderer extends TabBar.Renderer {
         if (decorationData.length > 0) {
             const baseIcon: VirtualElement = h.div({ className: baseClassName, style }, data.title.iconLabel);
             const wrapperClassName: string = WidgetDecoration.Styles.ICON_WRAPPER_CLASS;
-            const decoratorSizeClassName: string = inSidePanel ? WidgetDecoration.Styles.DECORATOR_SIDEBAR_SIZE_CLASS : WidgetDecoration.Styles.DECORATOR_SIZE_CLASS;
+            const decoratorSizeClassName: string = isInSidePanel ? WidgetDecoration.Styles.DECORATOR_SIDEBAR_SIZE_CLASS : WidgetDecoration.Styles.DECORATOR_SIZE_CLASS;
 
             decorationData
                 .filter(notEmpty)
                 .map(overlay => [overlay.position, overlay] as [WidgetDecoration.IconOverlayPosition, WidgetDecoration.IconOverlay | WidgetDecoration.IconClassOverlay])
                 .forEach(([position, overlay]) => {
-                    const iconAdditionalClasses: string[] = [decoratorSizeClassName, WidgetDecoration.IconOverlayPosition.getStyle(position, inSidePanel)];
+                    const iconAdditionalClasses: string[] = [decoratorSizeClassName, WidgetDecoration.IconOverlayPosition.getStyle(position, isInSidePanel)];
                     const overlayIconStyle = (color?: string) => {
                         if (color === undefined) {
                             return {};
@@ -576,22 +578,38 @@ export class ScrollableTabBar extends TabBar<Widget> {
  *
  * +-------------------------+-----------------+
  * |[TAB_0][TAB_1][TAB_2][TAB|         Toolbar |
- * +-------------Scrollable--+-None-Scrollable-+
+ * +-------------Scrollable--+-Non-Scrollable-+
  *
  */
 export class ToolbarAwareTabBar extends ScrollableTabBar {
 
-    protected contentContainer: HTMLElement | undefined;
+    protected contentContainer: HTMLElement;
     protected toolbar: TabBarToolbar | undefined;
+    protected breadcrumbsContainer: HTMLElement;
+    protected readonly breadcrumbsRenderer: BreadcrumbsRenderer;
+    protected topRow: HTMLElement;
 
     constructor(
         protected readonly tabBarToolbarRegistry: TabBarToolbarRegistry,
         protected readonly tabBarToolbarFactory: () => TabBarToolbar,
-        protected readonly options?: TabBar.IOptions<Widget> & PerfectScrollbar.Options) {
-
+        protected readonly breadcrumbsRendererFactory: BreadcrumbsRendererFactory,
+        protected readonly options?: TabBar.IOptions<Widget> & PerfectScrollbar.Options,
+    ) {
         super(options);
+        this.breadcrumbsRenderer = this.breadcrumbsRendererFactory();
         this.rewireDOM();
         this.toDispose.push(this.tabBarToolbarRegistry.onDidChange(() => this.update()));
+        this.toDispose.push(this.breadcrumbsRenderer);
+        this.toDispose.push(this.breadcrumbsRenderer.onDidChangeActiveState(active => {
+            this.node.classList.toggle('theia-tabBar-multirow', active);
+            if (this.parent) {
+                MessageLoop.sendMessage(this.parent, new Message('fit-request'));
+            }
+        }));
+        this.node.classList.toggle('theia-tabBar-multirow', this.breadcrumbsRenderer.active);
+        const handler = () => this.updateBreadcrumbs();
+        this.currentChanged.connect(handler);
+        this.toDispose.push(Disposable.create(() => this.currentChanged.disconnect(handler)));
     }
 
     /**
@@ -612,12 +630,22 @@ export class ToolbarAwareTabBar extends ScrollableTabBar {
         return this.node.getElementsByClassName(ToolbarAwareTabBar.Styles.TAB_BAR_CONTENT_CONTAINER)[0] as HTMLElement;
     }
 
+    protected async updateBreadcrumbs(): Promise<void> {
+        const current = this.currentTitle?.owner;
+        const uri = NavigatableWidget.is(current) ? current.getResourceUri() : undefined;
+        await this.breadcrumbsRenderer.refresh(uri);
+    }
+
     protected onAfterAttach(msg: Message): void {
         if (this.toolbar) {
             if (this.toolbar.isAttached) {
                 Widget.detach(this.toolbar);
             }
-            Widget.attach(this.toolbar, this.node);
+            Widget.attach(this.toolbar, this.topRow);
+            if (this.breadcrumbsContainer) {
+                this.node.appendChild(this.breadcrumbsContainer);
+            }
+            this.breadcrumbsRenderer?.refresh();
         }
         super.onAfterAttach(msg);
     }
@@ -638,10 +666,8 @@ export class ToolbarAwareTabBar extends ScrollableTabBar {
         if (!this.toolbar) {
             return;
         }
-        const current = this.currentTitle;
-        const widget = current && current.owner || undefined;
-        const items = widget ? this.tabBarToolbarRegistry.visibleItems(widget) : [];
-        this.toolbar.updateItems(items, widget);
+        const widget = this.currentTitle?.owner ?? undefined;
+        this.toolbar.updateTarget(widget);
     }
 
     handleEvent(event: Event): void {
@@ -662,16 +688,22 @@ export class ToolbarAwareTabBar extends ScrollableTabBar {
     protected rewireDOM(): void {
         const contentNode = this.node.getElementsByClassName(ToolbarAwareTabBar.Styles.TAB_BAR_CONTENT)[0];
         if (!contentNode) {
-            throw new Error("'this.node' does not have the content as a direct children with class name 'p-TabBar-content'.");
+            throw new Error("'this.node' does not have the content as a direct child with class name 'p-TabBar-content'.");
         }
         this.node.removeChild(contentNode);
+        this.topRow = document.createElement('div');
+        this.topRow.classList.add('theia-tabBar-tab-row');
         this.contentContainer = document.createElement('div');
         this.contentContainer.classList.add(ToolbarAwareTabBar.Styles.TAB_BAR_CONTENT_CONTAINER);
         this.contentContainer.appendChild(contentNode);
-        this.node.appendChild(this.contentContainer);
+        this.topRow.appendChild(this.contentContainer);
+        this.node.appendChild(this.topRow);
         this.toolbar = this.tabBarToolbarFactory();
+        this.breadcrumbsContainer = document.createElement('div');
+        this.breadcrumbsContainer.classList.add('theia-tabBar-breadcrumb-row');
+        this.breadcrumbsContainer.appendChild(this.breadcrumbsRenderer.host);
+        this.node.appendChild(this.breadcrumbsContainer);
     }
-
 }
 
 export namespace ToolbarAwareTabBar {
@@ -740,6 +772,18 @@ export class SideTabBar extends ScrollableTabBar {
     protected onAfterAttach(msg: Message): void {
         super.onAfterAttach(msg);
         this.renderTabBar();
+        this.node.addEventListener('p-dragenter', this);
+        this.node.addEventListener('p-dragover', this);
+        this.node.addEventListener('p-dragleave', this);
+        document.addEventListener('p-drop', this);
+    }
+
+    protected onAfterDetach(msg: Message): void {
+        super.onAfterDetach(msg);
+        this.node.removeEventListener('p-dragenter', this);
+        this.node.removeEventListener('p-dragover', this);
+        this.node.removeEventListener('p-dragleave', this);
+        document.removeEventListener('p-drop', this);
     }
 
     protected onUpdateRequest(msg: Message): void {
@@ -837,6 +881,15 @@ export class SideTabBar extends ScrollableTabBar {
                 this.onMouseMove(event as MouseEvent);
                 super.handleEvent(event);
                 break;
+            case 'p-dragenter':
+                this.onDragEnter(event as IDragEvent);
+                break;
+            case 'p-dragover':
+                this.onDragOver(event as IDragEvent);
+                break;
+            case 'p-dragleave': case 'p-drop':
+                this.cancelViewContainerDND();
+                break;
             default:
                 super.handleEvent(event);
         }
@@ -901,5 +954,79 @@ export class SideTabBar extends ScrollableTabBar {
             this.mouseData = undefined;
         }
     }
+
+    toCancelViewContainerDND = new DisposableCollection();
+    protected cancelViewContainerDND = () => {
+        this.toCancelViewContainerDND.dispose();
+    };
+
+    /**
+     * Handles `viewContainerPart` drag enter.
+     */
+    protected onDragEnter = (event: IDragEvent) => {
+        this.cancelViewContainerDND();
+        if (event.mimeData.getData('application/vnd.phosphor.view-container-factory')) {
+            event.preventDefault();
+            event.stopPropagation();
+        }
+    };
+
+    /**
+     * Handle `viewContainerPart` drag over,
+     * Defines the appropriate `drpAction` and opens the tab on which the mouse stands on for more than 800 ms.
+     */
+    protected onDragOver = (event: IDragEvent) => {
+        const factory = event.mimeData.getData('application/vnd.phosphor.view-container-factory');
+        const widget = factory && factory();
+        if (!widget) {
+            event.dropAction = 'none';
+            return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        if (!this.toCancelViewContainerDND.disposed) {
+            event.dropAction = event.proposedAction;
+            return;
+        }
+
+        const { target, clientX, clientY } = event;
+        if (target instanceof HTMLElement) {
+            if (widget.options.disableDraggingToOtherContainers || widget.viewContainer.disableDNDBetweenContainers) {
+                event.dropAction = 'none';
+                target.classList.add('theia-cursor-no-drop');
+                this.toCancelViewContainerDND.push(Disposable.create(() => {
+                    target.classList.remove('theia-cursor-no-drop');
+                }));
+            } else {
+                event.dropAction = event.proposedAction;
+            }
+            const { top, bottom, left, right, height } = target.getBoundingClientRect();
+            const mouseOnTop = (clientY - top) < (height / 2);
+            const dropTargetClass = `drop-target-${mouseOnTop ? 'top' : 'bottom'}`;
+            const tabs = this.contentNode.children;
+            const targetTab = ArrayExt.findFirstValue(tabs, t => ElementExt.hitTest(t, clientX, clientY));
+            if (!targetTab) {
+                return;
+            }
+            targetTab.classList.add(dropTargetClass);
+            this.toCancelViewContainerDND.push(Disposable.create(() => {
+                if (targetTab) {
+                    targetTab.classList.remove(dropTargetClass);
+                }
+            }));
+            const openTabTimer = setTimeout(() => {
+                const title = this.titles.find(t => (this.renderer as TabBarRenderer).createTabId(t) === targetTab.id);
+                if (title) {
+                    const mouseStillOnTab = clientX >= left && clientX <= right && clientY >= top && clientY <= bottom;
+                    if (mouseStillOnTab) {
+                        this.currentTitle = title;
+                    }
+                }
+            }, 800);
+            this.toCancelViewContainerDND.push(Disposable.create(() => {
+                clearTimeout(openTabTimer);
+            }));
+        }
+    };
 
 }

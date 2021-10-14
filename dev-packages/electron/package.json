@@ -1,6 +1,6 @@
 {
   "name": "@theia/electron",
-  "version": "1.13.0",
+  "version": "1.18.0",
   "description": "Electron runtime dependencies for Theia",
   "publishConfig": {
     "access": "public"
@@ -14,14 +14,22 @@
     "url": "https://github.com/eclipse-theia/theia/issues"
   },
   "homepage": "https://github.com/eclipse-theia/theia",
+  "files": [
+    "native/src",
+    "native/binding.gyp",
+    "scripts",
+    "*.js",
+    "*.d.ts",
+    "!.eslintrc.js"
+  ],
   "bin": {
     "electron": "electron-cli.js",
     "electron-codecs-test": "electron-codecs-test.js",
     "electron-replace-ffmpeg": "electron-replace-ffmpeg.js"
   },
   "dependencies": {
+    "@electron/get": "^1.12.4",
     "electron": "^9.0.2",
-    "electron-download": "^4.1.1",
     "electron-store": "^5.1.1",
     "fix-path": "^3.0.0",
     "native-keymap": "^2.1.2",

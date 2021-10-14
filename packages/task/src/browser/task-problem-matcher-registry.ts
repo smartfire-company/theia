@@ -144,7 +144,11 @@ export class ProblemMatcherRegistry {
                 patterns.push(ProblemPattern.fromProblemPatternContribution(matcher.pattern));
             }
         } else if (baseMatcher) {
-            patterns.push(...baseMatcher.pattern);
+            if (Array.isArray(baseMatcher.pattern)) {
+                patterns.push(...baseMatcher.pattern);
+            } else {
+                patterns.push(baseMatcher.pattern);
+            }
         }
 
         let deprecated: boolean | undefined = matcher.deprecated;
@@ -169,7 +173,7 @@ export class ProblemMatcherRegistry {
         }
         const problemMatcher = {
             name: matcher.name || (baseMatcher ? baseMatcher.name : undefined),
-            label: matcher.label || (baseMatcher ? baseMatcher.label : undefined),
+            label: matcher.label || baseMatcher?.label || '',
             deprecated,
             owner: matcher.owner || (baseMatcher ? baseMatcher.owner : ''),
             source: matcher.source || (baseMatcher ? baseMatcher.source : undefined),

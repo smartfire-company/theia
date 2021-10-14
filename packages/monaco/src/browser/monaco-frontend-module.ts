@@ -17,12 +17,12 @@
 import '../../src/browser/style/index.css';
 import '../../src/browser/style/symbol-sprite.svg';
 import '../../src/browser/style/symbol-icons.css';
-
 import { ContainerModule, decorate, injectable, interfaces } from '@theia/core/shared/inversify';
 import { MenuContribution, CommandContribution } from '@theia/core/lib/common';
 import {
-    QuickOpenService, FrontendApplicationContribution, KeybindingContribution,
-    PreferenceService, PreferenceSchemaProvider, createPreferenceProxy, QuickOpenContribution, PreferenceScope, PreferenceChange, OVERRIDE_PROPERTY_PATTERN
+    FrontendApplicationContribution, KeybindingContribution,
+    PreferenceService, PreferenceSchemaProvider, createPreferenceProxy,
+    PreferenceScope, PreferenceChange, OVERRIDE_PROPERTY_PATTERN, QuickInputService
 } from '@theia/core/lib/browser';
 import { TextEditorProvider, DiffNavigatorProvider } from '@theia/editor/lib/browser';
 import { StrictEditorTextFocusContext } from '@theia/editor/lib/browser/editor-keybinding-contexts';
@@ -39,7 +39,6 @@ import { MonacoOutlineContribution } from './monaco-outline-contribution';
 import { MonacoStatusBarContribution } from './monaco-status-bar-contribution';
 import { MonacoCommandService, MonacoCommandServiceFactory } from './monaco-command-service';
 import { MonacoCommandRegistry } from './monaco-command-registry';
-import { MonacoQuickOpenService } from './monaco-quick-open-service';
 import { MonacoDiffNavigatorFactory } from './monaco-diff-navigator-factory';
 import { MonacoStrictEditorTextFocusContext } from './monaco-keybinding-contexts';
 import { MonacoFrontendApplicationContribution } from './monaco-frontend-application-contribution';
@@ -62,6 +61,11 @@ import { LanguageService } from '@theia/core/lib/browser/language-service';
 import { MonacoToProtocolConverter } from './monaco-to-protocol-converter';
 import { ProtocolToMonacoConverter } from './protocol-to-monaco-converter';
 import { MonacoFormattingConflictsContribution } from './monaco-formatting-conflicts';
+import { MonacoQuickInputImplementation, MonacoQuickInputService } from './monaco-quick-input-service';
+import { GotoLineQuickAccessContribution } from './monaco-gotoline-quick-access';
+import { GotoSymbolQuickAccessContribution } from './monaco-gotosymbol-quick-access';
+import { QuickAccessContribution, QuickAccessRegistry } from '@theia/core/lib/browser/quick-input/quick-access';
+import { MonacoQuickAccessRegistry } from './monaco-quick-access-registry';
 
 decorate(injectable(), monaco.contextKeyService.ContextKeyService);
 
@@ -82,7 +86,7 @@ export default new ContainerModule((bind, unbind, isBound, rebind) => {
     bind(MonacoLanguages).toSelf().inSingletonScope();
     rebind(LanguageService).toService(MonacoLanguages);
     bind(WorkspaceSymbolCommand).toSelf().inSingletonScope();
-    for (const identifier of [CommandContribution, KeybindingContribution, QuickOpenContribution]) {
+    for (const identifier of [CommandContribution, KeybindingContribution, QuickAccessContribution]) {
         bind(identifier).toService(WorkspaceSymbolCommand);
     }
 
@@ -94,6 +98,7 @@ export default new ContainerModule((bind, unbind, isBound, rebind) => {
     bind(monaco.contextKeyService.ContextKeyService).toDynamicValue(({ container }) =>
         new monaco.contextKeyService.ContextKeyService(container.get(MonacoConfigurationService))
     ).inSingletonScope();
+
     bind(MonacoBulkEditService).toSelf().inSingletonScope();
     bind(MonacoEditorService).toSelf().inSingletonScope();
     bind(MonacoTextModelService).toSelf().inSingletonScope();
@@ -131,8 +136,18 @@ export default new ContainerModule((bind, unbind, isBound, rebind) => {
     bind(KeybindingContribution).toService(MonacoKeybindingContribution);
     rebind(StrictEditorTextFocusContext).to(MonacoStrictEditorTextFocusContext).inSingletonScope();
 
-    bind(MonacoQuickOpenService).toSelf().inSingletonScope();
-    rebind(QuickOpenService).toService(MonacoQuickOpenService);
+    bind(MonacoQuickInputImplementation).toSelf().inSingletonScope();
+    bind(MonacoQuickInputService).toSelf().inSingletonScope();
+    bind(QuickInputService).toService(MonacoQuickInputService);
+
+    bind(MonacoQuickAccessRegistry).toSelf().inSingletonScope();
+    bind(QuickAccessRegistry).toService(MonacoQuickAccessRegistry);
+
+    bind(GotoLineQuickAccessContribution).toSelf().inSingletonScope();
+    bind(QuickAccessContribution).toService(GotoLineQuickAccessContribution);
+
+    bind(GotoSymbolQuickAccessContribution).toSelf().inSingletonScope();
+    bind(QuickAccessContribution).toService(GotoSymbolQuickAccessContribution);
 
     MonacoTextmateModuleBinder(bind, unbind, isBound, rebind);
 

@@ -17,6 +17,7 @@
 import { injectable, inject } from 'inversify';
 import URI from '../common/uri';
 import { LabelProviderContribution, LabelProvider, DidChangeLabelEvent } from './label-provider';
+import { codicon } from './widgets';
 
 export namespace DiffUris {
 
@@ -81,10 +82,11 @@ export class DiffUriLabelProviderContribution implements LabelProviderContributi
         const [left, right] = DiffUris.decode(uri);
 
         if (left.path.toString() === right.path.toString() && left.query && right.query) {
-            return `${left.displayName}: ${left.query} ⟷ ${right.query}`;
+            const prefix = left.displayName ? `${left.displayName}: ` : '';
+            return `${prefix}${left.query} ⟷ ${right.query}`;
         } else {
             let title;
-            if (left.path.toString() !== right.path.toString() && left.displayName !== uri.displayName) {
+            if (uri.displayName && left.path.toString() !== right.path.toString() && left.displayName !== uri.displayName) {
                 title = `${uri.displayName}: `;
             } else {
                 title = '';
@@ -100,7 +102,7 @@ export class DiffUriLabelProviderContribution implements LabelProviderContributi
     }
 
     getIcon(uri: URI): string {
-        return 'fa fa-columns';
+        return codicon('split-horizontal');
     }
 
     affects(diffUri: URI, event: DidChangeLabelEvent): boolean {

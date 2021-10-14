@@ -102,6 +102,7 @@ export enum CompletionItemInsertTextRule {
 
 export interface Completion {
     label: string;
+    label2?: string;
     kind: CompletionItemKind;
     detail?: string;
     documentation?: string | MarkdownString;
@@ -166,7 +167,9 @@ export enum CompletionItemKind {
     Customcolor = 22,
     Folder = 23,
     TypeParameter = 24,
-    Snippet = 25
+    User = 25,
+    Issue = 26,
+    Snippet = 27
 }
 
 export class IdObject {
@@ -218,6 +221,7 @@ export enum MarkerSeverity {
 
 export enum MarkerTag {
     Unnecessary = 1,
+    Deprecated = 2,
 }
 
 export interface ParameterInformation {
@@ -313,7 +317,11 @@ export interface ReferenceContext {
     includeDeclaration: boolean;
 }
 
+export type CacheId = number;
+export type ChainedCacheId = [CacheId, CacheId];
+
 export interface DocumentLink {
+    cacheId?: ChainedCacheId,
     range: Range;
     url?: UriComponents | string;
     tooltip?: string;
@@ -515,6 +523,7 @@ export interface CallHierarchyDefinition {
     uri: UriComponents;
     range: Range;
     selectionRange: Range;
+    tags?: readonly SymbolTag[];
 }
 
 export interface CallHierarchyReference {
@@ -532,6 +541,7 @@ export interface CallHierarchyItem {
     uri: UriComponents;
     range: Range;
     selectionRange: Range;
+    tags?: readonly SymbolTag[];
 }
 
 export interface CallHierarchyIncomingCall {

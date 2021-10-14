@@ -39,7 +39,7 @@ import { ScmNavigatorDecorator } from './decorations/scm-navigator-decorator';
 import { ScmDecorationsService } from './decorations/scm-decorations-service';
 import { ScmAvatarService } from './scm-avatar-service';
 import { ScmContextKeyService } from './scm-context-key-service';
-import { ScmLayoutVersion3Migration } from './scm-layout-migrations';
+import { ScmLayoutVersion3Migration, ScmLayoutVersion5Migration } from './scm-layout-migrations';
 import { ScmTreeLabelProvider } from './scm-tree-label-provider';
 import { TabBarToolbarContribution } from '@theia/core/lib/browser/shell/tab-bar-toolbar';
 import { ColorContribution } from '@theia/core/lib/browser/color-application-contribution';
@@ -47,6 +47,7 @@ import { LabelProviderContribution } from '@theia/core/lib/browser/label-provide
 import { bindScmPreferences } from './scm-preferences';
 import { ScmTabBarDecorator } from './decorations/scm-tab-bar-decorator';
 import { TabBarDecorator } from '@theia/core/lib/browser/shell/tab-bar-decorator';
+import { OpenEditorsTreeDecorator } from '@theia/navigator/lib/browser/open-editors-widget/navigator-open-editors-decorator-service';
 
 export default new ContainerModule(bind => {
     bind(ScmContextKeyService).toSelf().inSingletonScope();
@@ -101,6 +102,7 @@ export default new ContainerModule(bind => {
         }
     })).inSingletonScope();
     bind(ApplicationShellLayoutMigration).to(ScmLayoutVersion3Migration).inSingletonScope();
+    bind(ApplicationShellLayoutMigration).to(ScmLayoutVersion5Migration).inSingletonScope();
 
     bind(ScmQuickOpenService).toSelf().inSingletonScope();
     bindViewContribution(bind, ScmContribution);
@@ -108,7 +110,9 @@ export default new ContainerModule(bind => {
     bind(TabBarToolbarContribution).toService(ScmContribution);
     bind(ColorContribution).toService(ScmContribution);
 
-    bind(NavigatorTreeDecorator).to(ScmNavigatorDecorator).inSingletonScope();
+    bind(ScmNavigatorDecorator).toSelf().inSingletonScope();
+    bind(NavigatorTreeDecorator).toService(ScmNavigatorDecorator);
+    bind(OpenEditorsTreeDecorator).toService(ScmNavigatorDecorator);
     bind(ScmDecorationsService).toSelf().inSingletonScope();
 
     bind(ScmAvatarService).toSelf().inSingletonScope();

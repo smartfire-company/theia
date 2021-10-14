@@ -22,6 +22,8 @@ import { ViewContextKeyService } from './view-context-key-service';
 import { StatefulWidget } from '@theia/core/lib/browser/shell/shell-layout-restorer';
 import { Message } from '@theia/core/shared/@phosphor/messaging';
 import { TreeViewWidget } from './tree-view-widget';
+import { DescriptionWidget } from '@theia/core/lib/browser/view-container';
+import { Emitter } from '@theia/core/lib/common';
 
 @injectable()
 export class PluginViewWidgetIdentifier {
@@ -30,7 +32,7 @@ export class PluginViewWidgetIdentifier {
 }
 
 @injectable()
-export class PluginViewWidget extends Panel implements StatefulWidget {
+export class PluginViewWidget extends Panel implements StatefulWidget, DescriptionWidget {
 
     @inject(MenuModelRegistry)
     protected readonly menus: MenuModelRegistry;
@@ -44,11 +46,15 @@ export class PluginViewWidget extends Panel implements StatefulWidget {
     @inject(PluginViewWidgetIdentifier)
     readonly options: PluginViewWidgetIdentifier;
 
+    currentViewContainerId: string | undefined;
+
     constructor() {
         super();
         this.node.tabIndex = -1;
         this.node.style.height = '100%';
     }
+
+    public onDidChangeDescription: Emitter<void> = new Emitter<void>();
 
     @postConstruct()
     protected init(): void {
@@ -70,13 +76,17 @@ export class PluginViewWidget extends Panel implements StatefulWidget {
         return {
             label: this.title.label,
             message: this.message,
-            widgets: this.widgets
+            widgets: this.widgets,
+            suppressUpdateViewVisibility: this._suppressUpdateViewVisibility,
+            currentViewContainerId: this.currentViewContainerId
         };
     }
 
     restoreState(state: PluginViewWidget.State): void {
         this.title.label = state.label;
         this.message = state.message;
+        this.suppressUpdateViewVisibility = state.suppressUpdateViewVisibility;
+        this.currentViewContainerId = state.currentViewContainerId;
         for (const widget of state.widgets) {
             this.addWidget(widget);
         }
@@ -110,6 +120,16 @@ export class PluginViewWidget extends Panel implements StatefulWidget {
         this.updateWidgetMessage();
     }
 
+    private _description: string = '';
+    get description(): string {
+        return this._description;
+    }
+
+    set description(description: string) {
+        this._description = description;
+        this.onDidChangeDescription.fire();
+    }
+
     private updateWidgetMessage(): void {
         const widget = this.widgets[0];
         if (widget) {
@@ -131,8 +151,10 @@ export class PluginViewWidget extends Panel implements StatefulWidget {
 }
 export namespace PluginViewWidget {
     export interface State {
-        label: string
-        message?: string;
-        widgets: ReadonlyArray<Widget>
+        label: string,
+        message?: string,
+        widgets: ReadonlyArray<Widget>,
+        suppressUpdateViewVisibility: boolean;
+        currentViewContainerId: string | undefined;
     }
 }

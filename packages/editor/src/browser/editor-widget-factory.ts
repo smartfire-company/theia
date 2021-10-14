@@ -24,6 +24,12 @@ import { TextEditorProvider } from './editor';
 @injectable()
 export class EditorWidgetFactory implements WidgetFactory {
 
+    static createID(uri: URI, counter?: number): string {
+        return EditorWidgetFactory.ID
+            + `:${uri.toString()}`
+            + (counter !== undefined ? `:${counter}` : '');
+    }
+
     static ID = 'code-editor-opener';
 
     readonly id = EditorWidgetFactory.ID;
@@ -43,8 +49,7 @@ export class EditorWidgetFactory implements WidgetFactory {
     }
 
     protected async createEditor(uri: URI, options?: NavigatableWidgetOptions): Promise<EditorWidget> {
-        const textEditor = await this.editorProvider(uri);
-        const newEditor = new EditorWidget(textEditor, this.selectionService);
+        const newEditor = await this.constructEditor(uri);
 
         this.setLabels(newEditor, uri);
         const labelListener = this.labelProvider.onDidChange(event => {
@@ -54,19 +59,21 @@ export class EditorWidgetFactory implements WidgetFactory {
         });
         newEditor.onDispose(() => labelListener.dispose());
 
-        newEditor.id = this.id + ':' + uri.toString();
-        if (options?.counter !== undefined) {
-            newEditor.id += `:${options.counter}`;
-        }
+        newEditor.id = EditorWidgetFactory.createID(uri, options?.counter);
+
         newEditor.title.closable = true;
         return newEditor;
     }
 
+    protected async constructEditor(uri: URI): Promise<EditorWidget> {
+        const textEditor = await this.editorProvider(uri);
+        return new EditorWidget(textEditor, this.selectionService);
+    }
+
     private setLabels(editor: EditorWidget, uri: URI): void {
-        editor.title.caption = this.labelProvider.getLongName(uri);
+        editor.title.caption = uri.path.toString();
         const icon = this.labelProvider.getIcon(uri);
         editor.title.label = this.labelProvider.getName(uri);
         editor.title.iconClass = icon + ' file-icon';
-
     }
 }

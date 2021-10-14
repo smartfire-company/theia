@@ -15,22 +15,25 @@
  ********************************************************************************/
 import { Emitter } from '@theia/core/lib/common/event';
 import { Path } from '@theia/core/lib/common/path';
-import { CommunicationProvider } from '@theia/debug/lib/common/debug-model';
 import * as theia from '@theia/plugin';
 import { URI } from '@theia/core/shared/vscode-uri';
 import { Breakpoint } from '../../../common/plugin-api-rpc-model';
-import { DebugExt, DebugMain, PLUGIN_RPC_CONTEXT as Ext, TerminalOptionsExt } from '../../../common/plugin-api-rpc';
+import { DebugConfigurationProviderTriggerKind, DebugExt, DebugMain, PLUGIN_RPC_CONTEXT as Ext, TerminalOptionsExt } from '../../../common/plugin-api-rpc';
 import { PluginPackageDebuggersContribution } from '../../../common/plugin-protocol';
 import { RPCProtocol } from '../../../common/rpc-protocol';
 import { PluginWebSocketChannel } from '../../../common/connection';
 import { CommandRegistryImpl } from '../../command-registry';
 import { ConnectionExtImpl } from '../../connection-ext';
-import { Disposable, Breakpoint as BreakpointExt, SourceBreakpoint, FunctionBreakpoint, Location, Range } from '../../types-impl';
+import {
+    Disposable, Breakpoint as BreakpointExt, SourceBreakpoint, FunctionBreakpoint, Location, Range,
+    DebugAdapterServer, DebugAdapterExecutable, DebugAdapterNamedPipeServer, DebugAdapterInlineImplementation
+} from '../../types-impl';
 import { resolveDebugAdapterExecutable } from './plugin-debug-adapter-executable-resolver';
 import { PluginDebugAdapterSession } from './plugin-debug-adapter-session';
-import { connectDebugAdapter, startDebugAdapter } from './plugin-debug-adapter-starter';
+import { connectInlineDebugAdapter, connectPipeDebugAdapter, connectSocketDebugAdapter, startDebugAdapter } from './plugin-debug-adapter-starter';
 import { PluginDebugAdapterTracker } from './plugin-debug-adapter-tracker';
 import uuid = require('uuid');
+import { CommunicationProvider } from '@theia/debug/lib/node/debug-model';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -43,8 +46,11 @@ export class DebugExtImpl implements DebugExt {
     // debug sessions by sessionId
     private sessions = new Map<string, PluginDebugAdapterSession>();
 
-    // providers by type
+    // providers by type (initial)
     private configurationProviders = new Map<string, Set<theia.DebugConfigurationProvider>>();
+    // providers by type (dynamic)
+    private dynamicConfigurationProviders = new Map<string, Set<theia.DebugConfigurationProvider>>();
+
     /**
      * Only use internally, don't send it to the frontend. It's expensive!
      * It's already there as a part of the plugin metadata.
@@ -159,8 +165,8 @@ export class DebugExtImpl implements DebugExt {
         }
     }
 
-    startDebugging(folder: theia.WorkspaceFolder | undefined, nameOrConfiguration: string | theia.DebugConfiguration): PromiseLike<boolean> {
-        return this.proxy.$startDebugging(folder, nameOrConfiguration);
+    startDebugging(folder: theia.WorkspaceFolder | undefined, nameOrConfiguration: string | theia.DebugConfiguration, options: theia.DebugSessionOptions): PromiseLike<boolean> {
+        return this.proxy.$startDebugging(folder, nameOrConfiguration, options);
     }
 
     registerDebugAdapterDescriptorFactory(debugType: string, factory: theia.DebugAdapterDescriptorFactory): Disposable {
@@ -182,19 +188,22 @@ export class DebugExtImpl implements DebugExt {
         });
     }
 
-    registerDebugConfigurationProvider(debugType: string, provider: theia.DebugConfigurationProvider): Disposable {
-        console.log(`Debug configuration provider has been registered: ${debugType}`);
-        const providers = this.configurationProviders.get(debugType) || new Set<theia.DebugConfigurationProvider>();
-        this.configurationProviders.set(debugType, providers);
+    registerDebugConfigurationProvider(debugType: string, provider: theia.DebugConfigurationProvider, trigger: theia.DebugConfigurationProviderTriggerKind): Disposable {
+        console.log(`Debug configuration provider has been registered: ${debugType}, trigger: ${trigger}`);
+        const providersByTriggerKind = trigger === DebugConfigurationProviderTriggerKind.Initial ? this.configurationProviders : this.dynamicConfigurationProviders;
+        let providers = providersByTriggerKind.get(debugType);
+        if (!providers) {
+            providersByTriggerKind.set(debugType, providers = new Set());
+        }
         providers.add(provider);
 
         return Disposable.create(() => {
             // eslint-disable-next-line @typescript-eslint/no-shadow
-            const providers = this.configurationProviders.get(debugType);
+            const providers = providersByTriggerKind.get(debugType);
             if (providers) {
                 providers.delete(provider);
                 if (providers.size === 0) {
-                    this.configurationProviders.delete(debugType);
+                    providersByTriggerKind.delete(debugType);
                 }
             }
         });
@@ -319,10 +328,10 @@ export class DebugExtImpl implements DebugExt {
         return undefined;
     }
 
-    async $provideDebugConfigurations(debugType: string, workspaceFolderUri: string | undefined): Promise<theia.DebugConfiguration[]> {
+    async $provideDebugConfigurations(debugType: string, workspaceFolderUri: string | undefined, dynamic: boolean = false): Promise<theia.DebugConfiguration[]> {
         let result: theia.DebugConfiguration[] = [];
 
-        const providers = this.configurationProviders.get(debugType);
+        const providers = dynamic ? this.dynamicConfigurationProviders.get(debugType) : this.configurationProviders.get(debugType);
         if (providers) {
             for (const provider of providers) {
                 if (provider.provideDebugConfigurations) {
@@ -337,7 +346,11 @@ export class DebugExtImpl implements DebugExt {
     async $resolveDebugConfigurations(debugConfiguration: theia.DebugConfiguration, workspaceFolderUri: string | undefined): Promise<theia.DebugConfiguration | undefined> {
         let current = debugConfiguration;
 
-        for (const providers of [this.configurationProviders.get(debugConfiguration.type), this.configurationProviders.get('*')]) {
+        for (const providers of [
+            this.configurationProviders.get(debugConfiguration.type),
+            this.dynamicConfigurationProviders.get(debugConfiguration.type),
+            this.configurationProviders.get('*')
+        ]) {
             if (providers) {
                 for (const provider of providers) {
                     if (provider.resolveDebugConfiguration) {
@@ -363,7 +376,11 @@ export class DebugExtImpl implements DebugExt {
         Promise<theia.DebugConfiguration | undefined> {
         let current = debugConfiguration;
 
-        for (const providers of [this.configurationProviders.get(debugConfiguration.type), this.configurationProviders.get('*')]) {
+        for (const providers of [
+            this.configurationProviders.get(debugConfiguration.type),
+            this.dynamicConfigurationProviders.get(debugConfiguration.type),
+            this.configurationProviders.get('*')
+        ]) {
             if (providers) {
                 for (const provider of providers) {
                     if (provider.resolveDebugConfigurationWithSubstitutedVariables) {
@@ -409,16 +426,20 @@ export class DebugExtImpl implements DebugExt {
             //  @param executable The debug adapter's executable information as specified in the package.json (or undefined if no such information exists).
             const descriptor = await descriptorFactory.createDebugAdapterDescriptor(session, executable);
             if (descriptor) {
-                if ('port' in descriptor) {
-                    return connectDebugAdapter(descriptor);
-                } else {
+                if (DebugAdapterServer.is(descriptor)) {
+                    return connectSocketDebugAdapter(descriptor);
+                } else if (DebugAdapterExecutable.is(descriptor)) {
                     return startDebugAdapter(descriptor);
+                } else if (DebugAdapterNamedPipeServer.is(descriptor)) {
+                    return connectPipeDebugAdapter(descriptor);
+                } else if (DebugAdapterInlineImplementation.is(descriptor)) {
+                    return connectInlineDebugAdapter(descriptor);
                 }
             }
         }
 
         if ('debugServer' in debugConfiguration) {
-            return connectDebugAdapter({ port: debugConfiguration.debugServer });
+            return connectSocketDebugAdapter({ port: debugConfiguration.debugServer });
         } else {
             if (!executable) {
                 throw new Error('It is not possible to provide debug adapter executable.');

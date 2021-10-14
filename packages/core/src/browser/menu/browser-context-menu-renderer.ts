@@ -18,7 +18,7 @@
 
 import { inject, injectable } from 'inversify';
 import { Menu } from '../widgets';
-import { ContextMenuAccess, ContextMenuRenderer, RenderContextMenuOptions } from '../context-menu-renderer';
+import { ContextMenuAccess, ContextMenuRenderer, coordinateFromAnchor, RenderContextMenuOptions } from '../context-menu-renderer';
 import { BrowserMainMenuFactory } from './browser-menu-plugin';
 
 export class BrowserContextMenuAccess extends ContextMenuAccess {
@@ -36,9 +36,9 @@ export class BrowserContextMenuRenderer extends ContextMenuRenderer {
         super();
     }
 
-    protected doRender({ menuPath, anchor, args, onHide }: RenderContextMenuOptions): BrowserContextMenuAccess {
+    protected doRender({ menuPath, anchor, args, onHide }: RenderContextMenuOptions): ContextMenuAccess {
         const contextMenu = this.menuFactory.createContextMenu(menuPath, args);
-        const { x, y } = anchor instanceof MouseEvent ? { x: anchor.clientX, y: anchor.clientY } : anchor!;
+        const { x, y } = coordinateFromAnchor(anchor);
         if (onHide) {
             contextMenu.aboutToClose.connect(() => onHide!());
         }

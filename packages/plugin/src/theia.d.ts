@@ -2018,6 +2018,10 @@ declare module '@theia/plugin' {
         onDidDelete: Event<Uri>;
     }
 
+    export class CancellationError extends Error {
+        constructor();
+    }
+
     /**
      * A cancellation token used to request cancellation on long running
      * or asynchronous task.
@@ -2072,100 +2076,10 @@ declare module '@theia/plugin' {
     }
 
     /**
-     * A light-weight user input UI that is initially not visible. After
-     * configuring it through its properties the extension can make it
-     * visible by calling [QuickInput.show](#QuickInput.show).
-     *
-     * There are several reasons why this UI might have to be hidden and
-     * the extension will be notified through [QuickInput.onDidHide](#QuickInput.onDidHide).
-     * (Examples include: an explicit call to [QuickInput.hide](#QuickInput.hide),
-     * the user pressing Esc, some other input UI opening, etc.)
-     *
-     * A user pressing Enter or some other gesture implying acceptance
-     * of the current state does not automatically hide this UI component.
-     * It is up to the extension to decide whether to accept the user's input
-     * and if the UI should indeed be hidden through a call to [QuickInput.hide](#QuickInput.hide).
-     *
-     * When the extension no longer needs this input UI, it should
-     * [QuickInput.dispose](#QuickInput.dispose) it to allow for freeing up
-     * any resources associated with it.
-     *
-     * See [QuickPick](#QuickPick) and [InputBox](#InputBox) for concrete UIs.
-     */
-    export interface QuickInput {
-
-        /**
-         * An optional title.
-         */
-        title: string | undefined;
-
-        /**
-         * An optional current step count.
-         */
-        step: number | undefined;
-
-        /**
-         * An optional total step count.
-         */
-        totalSteps: number | undefined;
-
-        /**
-         * If the UI should allow for user input. Defaults to true.
-         *
-         * Change this to false, e.g., while validating user input or
-         * loading data for the next step in user input.
-         */
-        enabled: boolean;
-
-        /**
-         * If the UI should show a progress indicator. Defaults to false.
-         *
-         * Change this to true, e.g., while loading more data or validating
-         * user input.
-         */
-        busy: boolean;
-
-        /**
-         * If the UI should stay open even when loosing UI focus. Defaults to false.
-         */
-        ignoreFocusOut: boolean;
-
-        /**
-         * Makes the input UI visible in its current configuration. Any other input
-         * UI will first fire an [QuickInput.onDidHide](#QuickInput.onDidHide) event.
-         */
-        show(): void;
-
-        /**
-         * Hides this input UI. This will also fire an [QuickInput.onDidHide](#QuickInput.onDidHide)
-         * event.
-         */
-        hide(): void;
-
-        /**
-         * An event signaling when this input UI is hidden.
-         *
-         * There are several reasons why this UI might have to be hidden and
-         * the extension will be notified through [QuickInput.onDidHide](#QuickInput.onDidHide).
-         * (Examples include: an explicit call to [QuickInput.hide](#QuickInput.hide),
-         * the user pressing Esc, some other input UI opening, etc.)
-         */
-        onDidHide: Event<void>;
-
-        /**
-         * Dispose of this input UI and any associated resources. If it is still
-         * visible, it is first hidden. After this call the input UI is no longer
-         * functional and no additional methods or properties on it should be
-         * accessed. Instead a new input UI should be created.
-         */
-        dispose(): void;
-    }
-
-    /**
-     * Something that can be selected from a list of items.
+     * Represents an item that can be selected from a list of items.
      */
     export interface QuickPickItem {
-
+        type?: 'item' | 'separator';
         /**
          * The item label
          */
@@ -2186,32 +2100,10 @@ declare module '@theia/plugin' {
          * not implemented yet
          */
         picked?: boolean;
-
         /**
-         * Used to display the group label in the right corner of item
+         * Always show this item.
          */
-        groupLabel?: string;
-
-        /**
-         * Used to display border after item
-         */
-        showBorder?: boolean;
-    }
-
-    /**
-     * Button for an action in a [QuickPick](#QuickPick) or [InputBox](#InputBox).
-     */
-    export interface QuickInputButton {
-
-        /**
-         * Icon for the button.
-         */
-        readonly iconPath: Uri | { light: Uri; dark: Uri } | ThemeIcon;
-
-        /**
-         * An optional tooltip.
-         */
-        readonly tooltip?: string | undefined;
+        alwaysShow?: boolean;
     }
 
     /**
@@ -2395,7 +2287,7 @@ declare module '@theia/plugin' {
          * @return A human readable string which is presented as diagnostic message.
          * Return `undefined`, or the empty string when 'value' is valid.
          */
-        validateInput?(value: string): string | undefined | PromiseLike<string | undefined>;
+        validateInput?: (input: string) => Promise<string | null | undefined> | undefined;
 
         /**
          * An optional function that will be called on Enter key.
@@ -2605,7 +2497,7 @@ declare module '@theia/plugin' {
          */
         static readonly Folder: ThemeIcon;
 
-        private constructor(id: string);
+        private constructor(public id: string);
     }
 
     /**
@@ -3148,6 +3040,31 @@ declare module '@theia/plugin' {
     }
 
     /**
+     * The ExtensionMode is provided on the `ExtensionContext` and indicates the
+     * mode the specific extension is running in.
+     */
+    export enum ExtensionMode {
+
+        /**
+         * The extension is installed normally (for example, from the marketplace
+         * or VSIX) in the editor.
+         */
+        Production = 1,
+
+        /**
+         * The extension is running from an `--extensionDevelopmentPath` provided
+         * when launching the editor.
+         */
+        Development = 2,
+
+        /**
+         * The extension is running from an `--extensionTestsPath` and
+         * the extension host is running unit tests.
+         */
+        Test = 3,
+    }
+
+    /**
      * A plug-in context is a collection of utilities private to a
      * plug-in.
      *
@@ -3172,7 +3089,27 @@ declare module '@theia/plugin' {
          * A memento object that stores state independent
          * of the current opened [workspace](#workspace.workspaceFolders).
          */
-        globalState: Memento;
+        globalState: Memento & {
+            /**
+             * Set the keys whose values should be synchronized across devices when synchronizing user-data
+             * like configuration, extensions, and mementos.
+             *
+             * Note that this function defines the whole set of keys whose values are synchronized:
+             *  - calling it with an empty array stops synchronization for this memento
+             *  - calling it with a non-empty array replaces all keys whose values are synchronized
+             *
+             * For any given set of keys this function needs to be called only once but there is no harm in
+             * repeatedly calling it.
+             *
+             * @param keys The set of keys whose values are synced.
+             */
+            setKeysForSync(keys: readonly string[]): void;
+        };
+
+        /**
+         * A storage utility for secrets.
+         */
+        readonly secrets: SecretStorage;
 
         /**
          * The absolute file path of the directory containing the extension.
@@ -3253,6 +3190,13 @@ declare module '@theia/plugin' {
          * the parent directory is guaranteed to be existent.
          */
         readonly logPath: string;
+
+        /**
+         * The mode the extension is running in. This is specific to the current
+         * extension. One extension may be in `ExtensionMode.Development` while
+         * other extensions in the host run in `ExtensionMode.Release`.
+         */
+        readonly extensionMode: ExtensionMode;
     }
 
     /**
@@ -3286,6 +3230,48 @@ declare module '@theia/plugin' {
          * @param value A value. MUST not contain cyclic references.
          */
         update(key: string, value: any): PromiseLike<void>;
+    }
+
+    /**
+     * The event data that is fired when a secret is added or removed.
+     */
+    export interface SecretStorageChangeEvent {
+        /**
+         * The key of the secret that has changed.
+         */
+        readonly key: string;
+    }
+
+    /**
+     * Represents a storage utility for secrets, information that is
+     * sensitive.
+     */
+    export interface SecretStorage {
+        /**
+         * Retrieve a secret that was stored with key. Returns undefined if there
+         * is no password matching that key.
+         * @param key The key the secret was stored under.
+         * @returns The stored value or `undefined`.
+         */
+        get(key: string): Thenable<string | undefined>;
+
+        /**
+         * Store a secret under a given key.
+         * @param key The key to store the secret under.
+         * @param value The secret.
+         */
+        store(key: string, value: string): Thenable<void>;
+
+        /**
+         * Remove a secret from storage.
+         * @param key The key the secret was stored under.
+         */
+        delete(key: string): Thenable<void>;
+
+        /**
+         * Fires when a secret is stored or deleted.
+         */
+        onDidChange: Event<SecretStorageChangeEvent>;
     }
 
     /**
@@ -4734,7 +4720,7 @@ declare module '@theia/plugin' {
         /**
          * Icon for the button.
          */
-        readonly iconPath: Uri | { light: Uri; dark: Uri } | ThemeIcon;
+        readonly iconPath: Uri | { light: string | Uri; dark: string | Uri } | monaco.theme.ThemeIcon;
 
         /**
          * An optional tooltip.
@@ -4891,6 +4877,12 @@ declare module '@theia/plugin' {
          * Changes to the title property will be properly reflected in the UI in the title of the view.
          */
         title?: string;
+
+        /**
+         * An optional human-readable subheading that will be rendered next to the main title.
+         * Setting the description to null, undefined, or empty string will remove the message from the view.
+         */
+        description?: string;
 
         /**
          * Reveal an element. By default revealed element is selected.
@@ -6213,7 +6205,7 @@ declare module '@theia/plugin' {
      *
      * @sample `let sel:DocumentSelector = { scheme: 'file', language: 'typescript' }`;
      */
-    export type DocumentSelector = DocumentFilter | string | Array<DocumentFilter | string>;
+    export type DocumentSelector = DocumentFilter | string | ReadonlyArray<DocumentFilter | string>;
 
     /**
      * A tuple of two characters, like a pair of
@@ -6324,6 +6316,14 @@ declare module '@theia/plugin' {
      * and various editor features, like automatic bracket insertion, automatic indentation etc.
      */
     export interface LanguageConfiguration {
+        /**
+         * @deprecated Use the autoClosingPairs property in the language configuration file instead.
+         */
+        __characterPairSupport?: { autoClosingPairs: { close: String, notIn: String[], open: String }[] }
+        /**
+         * @deprecated Do not use. Will be replaced by a better API soon.
+         */
+        __electricCharacterSupport?: { brackets: any, docComment: { close: String, lineStart: String, open: String, scope: String } }
         /**
          * The language's comment settings.
          */
@@ -7065,7 +7065,9 @@ declare module '@theia/plugin' {
         Struct = 21,
         Event = 22,
         Operator = 23,
-        TypeParameter = 24
+        TypeParameter = 24,
+        User = 25,
+        Issue = 26
     }
 
     /**
@@ -7319,6 +7321,18 @@ declare module '@theia/plugin' {
     }
 
     /**
+     * Represents the connection of two locations. Provides additional metadata over normal {@link Location locations},
+     * including an origin range.
+     */
+    export type LocationLink = DefinitionLink;
+
+    /**
+     * The declaration of a symbol representation as one or many {@link Location locations}
+     * or {@link LocationLink location links}.
+     */
+    export type Declaration = Location | Location[] | LocationLink[];
+
+    /**
      * The event that is fired when diagnostics change.
      */
     export interface DiagnosticChangeEvent {
@@ -7397,6 +7411,12 @@ declare module '@theia/plugin' {
          * instead of fading it out.
          */
         Unnecessary = 1,
+        /**
+         * Deprecated or obsolete code.
+         *
+         * Diagnostics with this tag are rendered with a strike through.
+         */
+        Deprecated = 2,
     }
 
     /**
@@ -9171,6 +9191,13 @@ declare module '@theia/plugin' {
     }
 
     /**
+     * A DebugProtocolMessage is an opaque stand-in type for the [ProtocolMessage](https://microsoft.github.io/debug-adapter-protocol/specification#Base_Protocol_ProtocolMessage) type defined in the Debug Adapter Protocol.
+     */
+    export interface DebugProtocolMessage {
+        // Properties: see details [here](https://microsoft.github.io/debug-adapter-protocol/specification#Base_Protocol_ProtocolMessage).
+    }
+
+    /**
      * Configuration for a debug session.
      */
     export interface DebugConfiguration {
@@ -9247,6 +9274,38 @@ declare module '@theia/plugin' {
     }
 
     /**
+     * Options for starting a debug session.
+     */
+    export interface DebugSessionOptions {
+
+        /**
+         * When specified the newly created debug session is registered as a "child" session of this
+         * "parent" debug session.
+         */
+        parentSession?: DebugSession;
+
+        /**
+         * Controls whether this session should have a separate debug console or share it
+         * with the parent session. Has no effect for sessions which do not have a parent session.
+         * Defaults to Separate.
+         */
+        consoleMode?: DebugConsoleMode;
+
+        /**
+         * Controls whether this session should run without debugging, thus ignoring breakpoints.
+         * When this property is not specified, the value from the parent session (if there is one) is used.
+         */
+        noDebug?: boolean;
+
+        /**
+         * Controls if the debug session's parent session is shown in the CALL STACK view even if it has only a single child.
+         * By default, the debug session will never hide its parent.
+         * If compact is true, debug sessions with a single child are hidden in the CALL STACK view to make the tree more compact.
+         */
+        compact?: boolean;
+    }
+
+    /**
      * A debug configuration provider allows to add the initial debug configurations to a newly created launch.json
      * and to resolve a launch configuration before it is used to start a new debug session.
      * A debug configuration provider is registered via #debug.registerDebugConfigurationProvider.
@@ -9258,7 +9317,7 @@ declare module '@theia/plugin' {
          *
          * @param folder The workspace folder for which the configurations are used or undefined for a folderless setup.
          * @param token A cancellation token.
-         * @return An array of [debug configurations](#DebugConfiguration).
+         * @return An array of {@link DebugConfiguration debug configurations}.
          */
         provideDebugConfigurations?(folder: WorkspaceFolder | undefined, token?: CancellationToken): ProviderResult<DebugConfiguration[]>;
 
@@ -9405,7 +9464,53 @@ declare module '@theia/plugin' {
         constructor(port: number, host?: string);
     }
 
-    export type DebugAdapterDescriptor = DebugAdapterExecutable | DebugAdapterServer;
+    /**
+     * Represents a debug adapter running as a Named Pipe (on Windows)/UNIX Domain Socket (on non-Windows) based server.
+     */
+    export class DebugAdapterNamedPipeServer {
+        /**
+         * The path to the NamedPipe/UNIX Domain Socket.
+         */
+        readonly path: string;
+
+        /**
+         * Create a description for a debug adapter running as a Named Pipe (on Windows)/UNIX Domain Socket (on non-Windows) based server.
+         */
+        constructor(path: string);
+    }
+
+    /**
+     * A debug adapter that implements the Debug Adapter Protocol can be registered with the editor if it implements the DebugAdapter interface.
+     */
+    export interface DebugAdapter extends Disposable {
+
+        /**
+         * An event which fires after the debug adapter has sent a Debug Adapter Protocol message to the editor.
+         * Messages can be requests, responses, or events.
+         */
+        readonly onDidSendMessage: Event<DebugProtocolMessage>;
+
+        /**
+         * Handle a Debug Adapter Protocol message.
+         * Messages can be requests, responses, or events.
+         * Results or errors are returned via onSendMessage events.
+         * @param message A Debug Adapter Protocol message
+         */
+        handleMessage(message: DebugProtocolMessage): void;
+    }
+
+    /**
+     * A debug adapter descriptor for an inline implementation.
+     */
+    export class DebugAdapterInlineImplementation {
+
+        /**
+         * Create a descriptor for an inline implementation of a debug adapter.
+         */
+        constructor(implementation: DebugAdapter);
+    }
+
+    export type DebugAdapterDescriptor = DebugAdapterExecutable | DebugAdapterServer | DebugAdapterNamedPipeServer | DebugAdapterInlineImplementation;
 
     export interface DebugAdapterDescriptorFactory {
         /**
@@ -9446,6 +9551,22 @@ declare module '@theia/plugin' {
          * @param value A string, falsy values will be printed.
          */
         appendLine(value: string): void;
+    }
+
+    /**
+     * Represents the debug console mode.
+     */
+    export enum DebugConsoleMode {
+        /**
+         * Debug session should have a separate debug console.
+         */
+        Separate = 0,
+
+        /**
+         * Debug session should share debug console with its parent session.
+         * This value has no effect for sessions which do not have a parent session.
+         */
+        MergeWithParent = 1
     }
 
     /**
@@ -9527,6 +9648,25 @@ declare module '@theia/plugin' {
     }
 
     /**
+     * A DebugConfigurationProviderTriggerKind specifies when the `provideDebugConfigurations` method of a `DebugConfigurationProvider` should be called.
+     * Currently there are two situations:
+     *  (1) providing debug configurations to populate a newly created `launch.json`
+     *  (2) providing dynamically generated configurations when the user asks for them through the UI (e.g. via the "Select and Start Debugging" command).
+     * A trigger kind is used when registering a `DebugConfigurationProvider` with {@link debug.registerDebugConfigurationProvider}.
+     */
+    export enum DebugConfigurationProviderTriggerKind {
+        /**
+         * `DebugConfigurationProvider.provideDebugConfigurations` is called to provide the initial debug configurations for a newly created launch.json.
+         */
+        Initial = 1,
+        /**
+         * `DebugConfigurationProvider.provideDebugConfigurations` is called to provide dynamically generated debug configurations when the user asks for them through the UI
+         * (e.g. via the "Select and Start Debugging" command).
+         */
+        Dynamic = 2
+    }
+
+    /**
      * Namespace for debug functionality.
      */
     export namespace debug {
@@ -9587,14 +9727,21 @@ declare module '@theia/plugin' {
         export function registerDebugAdapterDescriptorFactory(debugType: string, factory: DebugAdapterDescriptorFactory): Disposable;
 
         /**
-         * Register a [debug configuration provider](#DebugConfigurationProvider) for a specific debug type.
+         * Register a {@link DebugConfigurationProvider debug configuration provider} for a specific debug type.
+         * The optional {@link DebugConfigurationProviderTriggerKind triggerKind} can be used to specify when the `provideDebugConfigurations` method of the provider is triggered.
+         * Currently there are two situations:
+         *  (1) providing debug configurations to populate a newly created `launch.json`
+         *  (2) providing dynamically generated configurations when the user asks for them through the UI (e.g. via the "Select and Start Debugging" command).
+         * Please note that the `triggerKind` argument only applies to the `provideDebugConfigurations` method, the `resolveDebugConfiguration` methods are not affected at all.
+         * Registering a single provider with resolve methods for different trigger kinds results in the same resolve methods being called multiple times.
          * More than one provider can be registered for the same type.
          *
-         * @param type The debug type for which the provider is registered.
-         * @param provider The [debug configuration provider](#DebugConfigurationProvider) to register.
-         * @return A [disposable](#Disposable) that unregisters this provider when being disposed.
+         * @param debugType The debug type for which the provider is registered.
+         * @param provider The {@link DebugConfigurationProvider debug configuration provider} to register.
+         * @param triggerKind The {@link DebugConfigurationProviderTrigger trigger} for which the 'provideDebugConfiguration' method of the provider is registered. If `triggerKind` is missing, the value `DebugConfigurationProviderTriggerKind.Initial` is assumed.
+         * @return A {@link Disposable} that unregisters this provider when being disposed.
          */
-        export function registerDebugConfigurationProvider(debugType: string, provider: DebugConfigurationProvider): Disposable;
+        export function registerDebugConfigurationProvider(debugType: string, provider: DebugConfigurationProvider, triggerKind?: DebugConfigurationProviderTriggerKind): Disposable;
 
         /**
          * Register a debug adapter tracker factory for the given debug type.
@@ -9615,7 +9762,7 @@ declare module '@theia/plugin' {
          * @param nameOrConfiguration Either the name of a debug or compound configuration or a [DebugConfiguration](#DebugConfiguration) object.
          * @return A thenable that resolves when debugging could be successfully started.
          */
-        export function startDebugging(folder: WorkspaceFolder | undefined, nameOrConfiguration: string | DebugConfiguration): PromiseLike<boolean>;
+        export function startDebugging(folder: WorkspaceFolder | undefined, nameOrConfiguration: string | DebugConfiguration, options: DebugSessionOptions): PromiseLike<boolean>;
 
         /**
          * Add breakpoints.
@@ -10647,6 +10794,11 @@ declare module '@theia/plugin' {
          * Must be contained by the [`range`](#CallHierarchyItem.range).
          */
         selectionRange: Range;
+
+        /**
+         * Tags for this item.
+         */
+        tags?: readonly SymbolTag[];
 
         /**
          * Creates a new call hierarchy item.

@@ -17,7 +17,7 @@
 /* eslint-disable max-len, @typescript-eslint/indent */
 
 import debounce = require('lodash.debounce');
-import { injectable, inject } from 'inversify';
+import { injectable, inject, optional } from 'inversify';
 import { TabBar, Widget } from '@phosphor/widgets';
 import { MAIN_MENU_BAR, SETTINGS_MENU, MenuContribution, MenuModelRegistry, ACCOUNTS_MENU } from '../common/menu';
 import { KeybindingContribution, KeybindingRegistry } from './keybinding';
@@ -38,21 +38,23 @@ import { ResourceContextKey } from './resource-context-key';
 import { UriSelection } from '../common/selection';
 import { StorageService } from './storage-service';
 import { Navigatable } from './navigatable';
-import { QuickViewService } from './quick-view-service';
-import { PrefixQuickOpenService, QuickOpenItem, QuickOpenMode, QuickOpenService, QuickOpenGroupItem } from './quick-open';
+import { QuickViewService } from './quick-input/quick-view-service';
 import { environment } from '@theia/application-package/lib/environment';
 import { IconThemeService } from './icon-theme-service';
 import { ColorContribution } from './color-application-contribution';
 import { ColorRegistry, Color } from './color-registry';
-import { CorePreferences } from './core-preferences';
+import { CoreConfiguration, CorePreferences } from './core-preferences';
 import { ThemeService } from './theming';
-import { PreferenceService, PreferenceScope } from './preferences';
+import { PreferenceService, PreferenceScope, PreferenceChangeEvent } from './preferences';
 import { ClipboardService } from './clipboard-service';
 import { EncodingRegistry } from './encoding-registry';
 import { UTF8 } from '../common/encodings';
 import { EnvVariablesServer } from '../common/env-variables';
 import { AuthenticationService } from './authentication-service';
 import { FormatType } from './saveable';
+import { QuickInputService, QuickPick, QuickPickItem } from './quick-input';
+import { AsyncLocalizationProvider } from '../common/i18n/localization';
+import { nls } from './nls';
 
 export namespace CommonMenus {
 
@@ -215,6 +217,11 @@ export namespace CommonCommands {
         category: VIEW_CATEGORY,
         label: 'Toggle Bottom Panel'
     };
+    export const TOGGLE_STATUS_BAR: Command = {
+        id: 'workbench.action.toggleStatusbarVisibility',
+        category: VIEW_CATEGORY,
+        label: 'Toggle Status Bar Visibility'
+    };
     export const TOGGLE_MAXIMIZED: Command = {
         id: 'core.toggleMaximized',
         category: VIEW_CATEGORY,
@@ -270,6 +277,11 @@ export namespace CommonCommands {
         category: 'Preferences'
     };
 
+    export const CONFIGURE_DISPLAY_LANGUAGE = Command.toLocalizedCommand({
+        id: 'workbench.action.configureLanguage',
+        label: 'Configure Display Language'
+    }, 'vscode/localizationsActions/configureLocale');
+
 }
 
 export const supportCut = browser.isNative || document.queryCommandSupported('cut');
@@ -289,7 +301,8 @@ export class CommonFrontendContribution implements FrontendApplicationContributi
         @inject(SelectionService) protected readonly selectionService: SelectionService,
         @inject(MessageService) protected readonly messageService: MessageService,
         @inject(OpenerService) protected readonly openerService: OpenerService,
-        @inject(AboutDialog) protected readonly aboutDialog: AboutDialog
+        @inject(AboutDialog) protected readonly aboutDialog: AboutDialog,
+        @inject(AsyncLocalizationProvider) protected readonly localizationProvider: AsyncLocalizationProvider
     ) { }
 
     @inject(ContextKeyService)
@@ -304,20 +317,14 @@ export class CommonFrontendContribution implements FrontendApplicationContributi
     @inject(StorageService)
     protected readonly storageService: StorageService;
 
-    @inject(QuickViewService)
-    protected readonly quickView: QuickViewService;
-
-    @inject(PrefixQuickOpenService)
-    protected readonly quickOpen: PrefixQuickOpenService;
+    @inject(QuickInputService) @optional()
+    protected readonly quickInputService: QuickInputService;
 
     @inject(IconThemeService)
     protected readonly iconThemes: IconThemeService;
 
     @inject(ThemeService)
     protected readonly themeService: ThemeService;
-
-    @inject(QuickOpenService)
-    protected readonly quickOpenService: QuickOpenService;
 
     @inject(CorePreferences)
     protected readonly preferences: CorePreferences;
@@ -356,17 +363,11 @@ export class CommonFrontendContribution implements FrontendApplicationContributi
         this.updateStyles();
         this.updateThemeFromPreference('workbench.colorTheme');
         this.updateThemeFromPreference('workbench.iconTheme');
-        this.preferences.onPreferenceChanged(e => {
-            if (e.preferenceName === 'workbench.editor.highlightModifiedTabs') {
-                this.updateStyles();
-            } else if (e.preferenceName === 'workbench.colorTheme' || e.preferenceName === 'workbench.iconTheme') {
-                this.updateThemeFromPreference(e.preferenceName);
-            }
-        });
-        this.themeService.onThemeChange(() => this.updateThemePreference('workbench.colorTheme'));
+        this.preferences.onPreferenceChanged(e => this.handlePreferenceChange(e, app));
+        this.themeService.onDidColorThemeChange(() => this.updateThemePreference('workbench.colorTheme'));
         this.iconThemes.onDidChangeCurrent(() => this.updateThemePreference('workbench.iconTheme'));
 
-        app.shell.leftPanelHandler.addMenu({
+        app.shell.leftPanelHandler.addBottomMenu({
             id: 'settings-menu',
             iconClass: 'codicon codicon-settings-gear',
             title: 'Settings',
@@ -381,11 +382,11 @@ export class CommonFrontendContribution implements FrontendApplicationContributi
             order: 1,
         };
         this.authenticationService.onDidRegisterAuthenticationProvider(() => {
-            app.shell.leftPanelHandler.addMenu(accountsMenu);
+            app.shell.leftPanelHandler.addBottomMenu(accountsMenu);
         });
         this.authenticationService.onDidUnregisterAuthenticationProvider(() => {
             if (this.authenticationService.getProviderIds().length === 0) {
-                app.shell.leftPanelHandler.removeMenu(accountsMenu.id);
+                app.shell.leftPanelHandler.removeBottomMenu(accountsMenu.id);
             }
         });
     }
@@ -419,6 +420,36 @@ export class CommonFrontendContribution implements FrontendApplicationContributi
                 this.themeService.setCurrentTheme(value || this.themeService.defaultTheme.id);
             } else {
                 this.iconThemes.current = value || this.iconThemes.default.id;
+            }
+        }
+    }
+
+    protected handlePreferenceChange(e: PreferenceChangeEvent<CoreConfiguration>, app: FrontendApplication): void {
+        switch (e.preferenceName) {
+            case 'workbench.editor.highlightModifiedTabs': {
+                this.updateStyles();
+                break;
+            }
+            case 'workbench.colorTheme':
+            case 'workbench.iconTheme': {
+                this.updateThemeFromPreference(e.preferenceName);
+                break;
+            }
+            case 'window.menuBarVisibility': {
+                const { newValue } = e;
+                const mainMenuId = 'main-menu';
+                if (newValue === 'compact') {
+                    this.shell.leftPanelHandler.addTopMenu({
+                        id: mainMenuId,
+                        iconClass: 'codicon codicon-menu',
+                        title: 'Application Menu',
+                        menuPath: ['menubar'],
+                        order: 0,
+                    });
+                } else {
+                    app.shell.leftPanelHandler.removeTopMenu(mainMenuId);
+                }
+                break;
             }
         }
     }
@@ -502,8 +533,13 @@ export class CommonFrontendContribution implements FrontendApplicationContributi
             order: '0'
         });
         registry.registerMenuAction(CommonMenus.VIEW_LAYOUT, {
+            commandId: CommonCommands.TOGGLE_STATUS_BAR.id,
+            order: '1',
+            label: 'Toggle Status Bar'
+        });
+        registry.registerMenuAction(CommonMenus.VIEW_LAYOUT, {
             commandId: CommonCommands.COLLAPSE_ALL_PANELS.id,
-            order: '1'
+            order: '2'
         });
 
         registry.registerMenuAction(SHELL_TABBAR_CONTEXT_MENU, {
@@ -745,6 +781,9 @@ export class CommonFrontendContribution implements FrontendApplicationContributi
                 }
             }
         });
+        commandRegistry.registerCommand(CommonCommands.TOGGLE_STATUS_BAR, {
+            execute: () => this.preferenceService.updateValue('workbench.statusBar.visible', !this.preferences['workbench.statusBar.visible'])
+        });
         commandRegistry.registerCommand(CommonCommands.TOGGLE_MAXIMIZED, {
             isEnabled: (event?: Event) => this.canToggleMaximized(event),
             isVisible: (event?: Event) => this.canToggleMaximized(event),
@@ -765,7 +804,7 @@ export class CommonFrontendContribution implements FrontendApplicationContributi
         });
 
         commandRegistry.registerCommand(CommonCommands.OPEN_VIEW, {
-            execute: () => this.quickOpen.open(this.quickView.prefix)
+            execute: () => this.quickInputService?.open(QuickViewService.PREFIX)
         });
 
         commandRegistry.registerCommand(CommonCommands.SELECT_COLOR_THEME, {
@@ -773,6 +812,10 @@ export class CommonFrontendContribution implements FrontendApplicationContributi
         });
         commandRegistry.registerCommand(CommonCommands.SELECT_ICON_THEME, {
             execute: () => this.selectIconTheme()
+        });
+
+        commandRegistry.registerCommand(CommonCommands.CONFIGURE_DISPLAY_LANGUAGE, {
+            execute: () => this.configureDisplayLanguage()
         });
     }
 
@@ -987,86 +1030,104 @@ export class CommonFrontendContribution implements FrontendApplicationContributi
         }
     }
 
+    protected async configureDisplayLanguage(): Promise<void> {
+        const availableLanguages = await this.localizationProvider.getAvailableLanguages();
+        const items: QuickPickItem[] = [];
+        for (const additionalLanguage of ['en', ...availableLanguages]) {
+            items.push({
+                label: additionalLanguage,
+                execute: () => {
+                    if (additionalLanguage !== nls.locale) {
+                        window.localStorage.setItem(nls.localeId, additionalLanguage);
+                        window.location.reload();
+                    }
+                }
+            });
+        }
+        this.quickInputService?.showQuickPick(items,
+            {
+                placeholder: CommonCommands.CONFIGURE_DISPLAY_LANGUAGE.label,
+                activeItem: items.find(item => item.label === (nls.locale || 'en'))
+            });
+    }
+
     protected selectIconTheme(): void {
         let resetTo: string | undefined = this.iconThemes.current;
         const previewTheme = debounce((id: string) => this.iconThemes.current = id, 200);
 
-        let items: (QuickOpenItem & { id: string })[] = [];
+        let items: Array<QuickPickItem> = [];
         for (const iconTheme of this.iconThemes.definitions) {
-            const item = Object.assign(new QuickOpenItem({
+            items.push({
+                id: iconTheme.id,
                 label: iconTheme.label,
                 description: iconTheme.description,
-                run: (mode: QuickOpenMode) => {
-                    if (mode === QuickOpenMode.OPEN) {
-                        resetTo = undefined;
-                    }
-                    previewTheme(iconTheme.id);
-                    return true;
-                }
-            }), { id: iconTheme.id });
-            items.push(item);
+            });
         }
         items = items.sort((a, b) => {
             if (a.id === 'none') {
                 return -1;
             }
-            return a.getLabel()!.localeCompare(b.getLabel()!);
+            return a.label!.localeCompare(b.label!);
         });
-        this.quickOpenService.open({
-            onType: (_, accept) => accept(items)
-        }, {
-            placeholder: 'Select File Icon Theme',
-            fuzzyMatchLabel: true,
-            selectIndex: () => items.findIndex(item => item.id === this.iconThemes.current),
-            onClose: () => {
-                if (resetTo) {
-                    previewTheme.cancel();
-                    this.iconThemes.current = resetTo;
+
+        this.quickInputService?.showQuickPick(items,
+            {
+                placeholder: 'Select File Icon Theme',
+                activeItem: items.find(item => item.id === resetTo),
+                onDidChangeSelection: (quickPick: QuickPick<QuickPickItem>, selectedItems: Array<QuickPickItem>) => {
+                    resetTo = undefined;
+                    previewTheme(selectedItems[0].id!);
+                },
+                onDidChangeActive: (quickPick: QuickPick<QuickPickItem>, activeItems: Array<QuickPickItem>) => {
+                    previewTheme(activeItems[0].id!);
+                },
+                onDidHide: () => {
+                    if (resetTo) {
+                        this.iconThemes.current = resetTo;
+                    }
                 }
-            }
-        });
+            });
     }
 
     protected selectColorTheme(): void {
         let resetTo: string | undefined = this.themeService.getCurrentTheme().id;
         const previewTheme = debounce((id: string) => this.themeService.setCurrentTheme(id), 200);
 
-        type ThemeQuickOpenItem = QuickOpenItem & { id: string };
-        const itemsByTheme: { light: ThemeQuickOpenItem[], dark: ThemeQuickOpenItem[], hc: ThemeQuickOpenItem[] } = { light: [], dark: [], hc: [] };
+        const itemsByTheme: { light: Array<QuickPickItem>, dark: Array<QuickPickItem>, hc: Array<QuickPickItem> } = { light: [], dark: [], hc: [] };
         for (const theme of this.themeService.getThemes().sort((a, b) => a.label.localeCompare(b.label))) {
             const themeItems = itemsByTheme[theme.type];
-            const groupLabel = themeItems.length === 0 ? (theme.type === 'hc' ? 'high contrast' : theme.type) + ' themes' : undefined;
-            themeItems.push(Object.assign(new QuickOpenGroupItem({
+            if (themeItems.length === 0) {
+                themeItems.push({
+                    type: 'separator',
+                    label: (theme.type === 'hc' ? 'high contrast' : theme.type) + ' themes'
+                });
+            }
+            themeItems.push({
+                id: theme.id,
                 label: theme.label,
                 description: theme.description,
-                run: (mode: QuickOpenMode) => {
-                    if (mode === QuickOpenMode.OPEN) {
-                        resetTo = undefined;
-                    }
-                    previewTheme(theme.id);
-                    return true;
-                },
-                groupLabel,
-                showBorder: !!groupLabel && theme.type !== 'light'
-            }), { id: theme.id }));
+            });
         }
         const items = [...itemsByTheme.light, ...itemsByTheme.dark, ...itemsByTheme.hc];
-        this.quickOpenService.open({
-            onType: (_, accept) => accept(items)
-        }, {
-            placeholder: 'Select Color Theme (Up/Down Keys to Preview)',
-            fuzzyMatchLabel: true,
-            selectIndex: () => {
-                const current = this.themeService.getCurrentTheme().id;
-                return items.findIndex(item => item.id === current);
-            },
-            onClose: () => {
-                if (resetTo) {
-                    previewTheme.cancel();
-                    this.themeService.setCurrentTheme(resetTo);
+        this.quickInputService?.showQuickPick(items,
+            {
+                placeholder: 'Select Color Theme (Up/Down Keys to Preview)',
+                activeItem: items.find((item: QuickPickItem) => item.id === resetTo),
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                onDidChangeSelection: (quickPick: any, selectedItems: Array<QuickPickItem>) => {
+                    resetTo = undefined;
+                    previewTheme(selectedItems[0].id!);
+                },
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                onDidChangeActive: (quickPick: any, activeItems: Array<QuickPickItem>) => {
+                    previewTheme(activeItems[0].id!);
+                },
+                onDidHide: () => {
+                    if (resetTo) {
+                        this.themeService.setCurrentTheme(resetTo);
+                    }
                 }
-            }
-        });
+            });
     }
 
     registerColors(colors: ColorRegistry): void {
@@ -1177,6 +1238,8 @@ export class CommonFrontendContribution implements FrontendApplicationContributi
             { id: 'list.hoverBackground', defaults: { dark: '#2A2D2E', light: '#F0F0F0' }, description: 'List/Tree background when hovering over items using the mouse.' },
             { id: 'list.hoverForeground', description: 'List/Tree foreground when hovering over items using the mouse.' },
             { id: 'list.filterMatchBackground', defaults: { dark: 'editor.findMatchHighlightBackground', light: 'editor.findMatchHighlightBackground' }, description: 'Background color of the filtered match.' },
+            { id: 'list.highlightForeground', defaults: { dark: '#18A3FF', light: '#0066BF', hc: 'focusBorder' }, description: 'List/Tree foreground color of the match highlights when searching inside the list/tree.' },
+            { id: 'list.focusHighlightForeground', defaults: { dark: 'list.highlightForeground', light: 'list.activeSelectionForeground', hc: 'list.highlightForeground' }, description: 'List/Tree foreground color of the match highlights on actively focused items when searching inside the list/tree.' },
             { id: 'tree.inactiveIndentGuidesStroke', defaults: { dark: Color.transparent('tree.indentGuidesStroke', 0.4), light: Color.transparent('tree.indentGuidesStroke', 0.4), hc: Color.transparent('tree.indentGuidesStroke', 0.4) }, description: 'Tree stroke color for the inactive indentation guides.' },
 
             // Editor Group & Tabs colors should be aligned with https://code.visualstudio.com/api/references/theme-color#editor-groups-tabs
@@ -1419,6 +1482,27 @@ export class CommonFrontendContribution implements FrontendApplicationContributi
                     light: 'sideBar.foreground',
                     hc: 'sideBar.foreground'
                 }, description: 'Quick Input foreground color. The Quick Input widget is the container for views like the color theme picker.'
+            },
+            {
+                id: 'quickInput.list.focusBackground', defaults: {
+                    dark: undefined,
+                    light: undefined,
+                    hc: undefined
+                }, description: 'quickInput.list.focusBackground deprecation. Please use quickInputList.focusBackground instead'
+            },
+            {
+                id: 'quickInputList.focusForeground', defaults: {
+                    dark: 'list.activeSelectionForeground',
+                    light: 'list.activeSelectionForeground',
+                    hc: 'list.activeSelectionForeground'
+                }, description: 'Quick picker foreground color for the focused item'
+            },
+            {
+                id: 'quickInputList.focusBackground', defaults: {
+                    dark: 'list.activeSelectionBackground',
+                    light: 'list.activeSelectionBackground',
+                    hc: undefined
+                }, description: 'Quick picker background color for the focused item.'
             },
 
             // Panel colors should be aligned with https://code.visualstudio.com/api/references/theme-color#panel-colors
@@ -1873,6 +1957,51 @@ export class CommonFrontendContribution implements FrontendApplicationContributi
                     light: '#c5c5c5',
                     hc: '#c5c5c5'
                 }, description: 'Editor gutter decoration color for commenting ranges.'
+            },
+            {
+                id: 'breadcrumb.foreground',
+                defaults: {
+                    dark: Color.transparent('foreground', 0.8),
+                    light: Color.transparent('foreground', 0.8),
+                    hc: Color.transparent('foreground', 0.8),
+                },
+                description: 'Color of breadcrumb item text'
+            },
+            {
+                id: 'breadcrumb.background',
+                defaults: {
+                    dark: 'editor.background',
+                    light: 'editor.background',
+                    hc: 'editor.background',
+                },
+                description: 'Color of breadcrumb item background'
+            },
+            {
+                id: 'breadcrumb.focusForeground',
+                defaults: {
+                    dark: Color.lighten('foreground', 0.1),
+                    light: Color.darken('foreground', 0.2),
+                    hc: Color.lighten('foreground', 0.1),
+                },
+                description: 'Color of breadcrumb item text when focused'
+            },
+            {
+                id: 'breadcrumb.activeSelectionForeground',
+                defaults: {
+                    dark: Color.lighten('foreground', 0.1),
+                    light: Color.darken('foreground', 0.2),
+                    hc: Color.lighten('foreground', 0.1),
+                },
+                description: 'Color of selected breadcrumb item'
+            },
+            {
+                id: 'breadcrumbPicker.background',
+                defaults: {
+                    dark: 'editorWidget.background',
+                    light: 'editorWidget.background',
+                    hc: 'editorWidget.background',
+                },
+                description: 'Background color of breadcrumb item picker'
             }
         );
     }

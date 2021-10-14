@@ -14,13 +14,14 @@
  * SPDX-License-Identifier: EPL-2.0 OR GPL-2.0 WITH Classpath-exception-2.0
  ********************************************************************************/
 
+import { dynamicRequire } from '@theia/core/lib/node/dynamic-require';
 import { PluginManagerExtImpl } from '../../plugin/plugin-manager';
 import { MAIN_RPC_CONTEXT, Plugin, PluginAPIFactory } from '../../common/plugin-api-rpc';
 import { PluginMetadata } from '../../common/plugin-protocol';
 import { createAPIFactory } from '../../plugin/plugin-context';
 import { EnvExtImpl } from '../../plugin/env';
 import { PreferenceRegistryExtImpl } from '../../plugin/preference-registry';
-import { ExtPluginApi } from '../../common/plugin-ext-api-contribution';
+import { ExtPluginApi, ExtPluginApiBackendInitializationFn } from '../../common/plugin-ext-api-contribution';
 import { DebugExtImpl } from '../../plugin/node/debug/debug';
 import { EditorsAndDocumentsExtImpl } from '../../plugin/editors-and-documents';
 import { WorkspaceExtImpl } from '../../plugin/workspace';
@@ -31,6 +32,8 @@ import { loadManifest } from './plugin-manifest-loader';
 import { KeyValueStorageProxy } from '../../plugin/plugin-storage';
 import { WebviewsExtImpl } from '../../plugin/webviews';
 import { TerminalServiceExtImpl } from '../../plugin/terminal-ext';
+import { SecretsExtImpl } from '../../plugin/secrets-ext';
+import { BackendInitializationFn } from '../../common';
 
 /**
  * Handle the RPC calls.
@@ -56,13 +59,15 @@ export class PluginHostRPC {
         const clipboardExt = new ClipboardExt(this.rpc);
         const webviewExt = new WebviewsExtImpl(this.rpc, workspaceExt);
         const terminalService = new TerminalServiceExtImpl(this.rpc);
-        this.pluginManager = this.createPluginManager(envExt, terminalService, storageProxy, preferenceRegistryExt, webviewExt, this.rpc);
+        const secretsExt = new SecretsExtImpl(this.rpc);
+        this.pluginManager = this.createPluginManager(envExt, terminalService, storageProxy, preferenceRegistryExt, webviewExt, secretsExt, this.rpc);
         this.rpc.set(MAIN_RPC_CONTEXT.HOSTED_PLUGIN_MANAGER_EXT, this.pluginManager);
         this.rpc.set(MAIN_RPC_CONTEXT.EDITORS_AND_DOCUMENTS_EXT, editorsAndDocumentsExt);
         this.rpc.set(MAIN_RPC_CONTEXT.WORKSPACE_EXT, workspaceExt);
         this.rpc.set(MAIN_RPC_CONTEXT.PREFERENCE_REGISTRY_EXT, preferenceRegistryExt);
         this.rpc.set(MAIN_RPC_CONTEXT.STORAGE_EXT, storageProxy);
         this.rpc.set(MAIN_RPC_CONTEXT.WEBVIEWS_EXT, webviewExt);
+        this.rpc.set(MAIN_RPC_CONTEXT.SECRETS_EXT, secretsExt);
 
         this.apiFactory = createAPIFactory(
             this.rpc,
@@ -82,12 +87,11 @@ export class PluginHostRPC {
         await this.pluginManager.terminate();
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    initContext(contextPath: string, plugin: Plugin): any {
+    initContext(contextPath: string, plugin: Plugin): void {
         const { name, version } = plugin.rawModel;
         console.log('PLUGIN_HOST(' + process.pid + '): initializing(' + name + '@' + version + ' with ' + contextPath + ')');
         try {
-            const backendInit = require(contextPath);
+            const backendInit = dynamicRequire<{ doInitialization: BackendInitializationFn }>(contextPath);
             backendInit.doInitialization(this.apiFactory, plugin);
         } catch (e) {
             console.error(e);
@@ -95,9 +99,11 @@ export class PluginHostRPC {
     }
 
     createPluginManager(
-        envExt: EnvExtImpl, terminalService: TerminalServiceExtImpl, storageProxy: KeyValueStorageProxy, preferencesManager: PreferenceRegistryExtImpl, webview: WebviewsExtImpl,
+        envExt: EnvExtImpl, terminalService: TerminalServiceExtImpl, storageProxy: KeyValueStorageProxy,
+        preferencesManager: PreferenceRegistryExtImpl, webview: WebviewsExtImpl, secretsExt: SecretsExtImpl,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        rpc: any): PluginManagerExtImpl {
+        rpc: any
+    ): PluginManagerExtImpl {
         const { extensionTestsPath } = process.env;
         const self = this;
         const pluginManager = new PluginManagerExtImpl({
@@ -140,7 +146,7 @@ export class PluginHostRPC {
 
                 });
                 if (plugin.pluginPath) {
-                    return require(plugin.pluginPath);
+                    return dynamicRequire(plugin.pluginPath);
                 }
             },
             async init(raw: PluginMetadata[]): Promise<[Plugin[], Plugin[]]> {
@@ -193,7 +199,7 @@ export class PluginHostRPC {
                 for (const api of extApi) {
                     if (api.backendInitPath) {
                         try {
-                            const extApiInit = require(api.backendInitPath);
+                            const extApiInit = dynamicRequire<{ provideApi: ExtPluginApiBackendInitializationFn }>(api.backendInitPath);
                             extApiInit.provideApi(rpc, pluginManager);
                         } catch (e) {
                             console.error(e);
@@ -207,7 +213,7 @@ export class PluginHostRPC {
                 let testRunner: any;
                 let requireError: Error | undefined;
                 try {
-                    testRunner = require(extensionTestsPath);
+                    testRunner = dynamicRequire(extensionTestsPath);
                 } catch (error) {
                     requireError = error;
                 }
@@ -229,7 +235,7 @@ export class PluginHostRPC {
                     `Path ${extensionTestsPath} does not point to a valid extension test runner.`
                 );
             } : undefined
-        }, envExt, terminalService, storageProxy, preferencesManager, webview, rpc);
+        }, envExt, terminalService, storageProxy, secretsExt, preferencesManager, webview, rpc);
         return pluginManager;
     }
 }

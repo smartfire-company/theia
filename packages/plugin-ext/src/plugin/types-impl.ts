@@ -24,7 +24,7 @@
 
 import { UUID } from '@theia/core/shared/@phosphor/coreutils';
 import { illegalArgument } from '../common/errors';
-import * as theia from '@theia/plugin';
+import type * as theia from '@theia/plugin';
 import { URI as CodeURI, UriComponents } from '@theia/core/shared/vscode-uri';
 import { relative } from '../common/paths-util';
 import { startsWithIgnoreCase } from '@theia/core/lib/common/strings';
@@ -33,6 +33,7 @@ import { SymbolKind } from '../common/plugin-api-rpc-model';
 import { FileSystemProviderErrorCode, markAsFileSystemProviderError } from '@theia/filesystem/lib/common/files';
 import * as paths from 'path';
 import { ObjectsTransferrer } from '../common/rpc-protocol';
+import { es5ClassCompat } from '../common/types';
 
 /**
  * A reviver that takes URI's transferred via JSON.stringify() and makes
@@ -49,9 +50,10 @@ export function reviver(key: string | undefined, value: any): any {
 /**
  * This is an implementation of #theia.Uri based on vscode-uri.
  * This is supposed to fix https://github.com/eclipse-theia/theia/issues/8752
- * We cannot simply upgrade the dependency, because the curent version 3.x
+ * We cannot simply upgrade the dependency, because the current version 3.x
  * is not compatible with our current codebase
  */
+@es5ClassCompat
 export class URI extends CodeURI implements theia.Uri {
     protected constructor(scheme: string, authority?: string, path?: string, query?: string, fragment?: string, _strict?: boolean);
     protected constructor(components: UriComponents);
@@ -85,7 +87,7 @@ export class URI extends CodeURI implements theia.Uri {
     }
 
     /**
-     * Overrride to create the correct class.
+     * Override to create the correct class.
      * @param data
      */
     static revive(data: UriComponents | CodeURI): URI;
@@ -114,6 +116,7 @@ export class URI extends CodeURI implements theia.Uri {
     }
 }
 
+@es5ClassCompat
 export class Disposable {
     private disposable: undefined | (() => void);
 
@@ -186,6 +189,26 @@ export enum ColorThemeKind {
     HighContrast = 3
 }
 
+export enum ExtensionMode {
+    /**
+     * The extension is installed normally (for example, from the marketplace
+     * or VSIX) in the editor.
+     */
+    Production = 1,
+
+    /**
+     * The extension is running from an `--extensionDevelopmentPath` provided
+     * when launching the editor.
+     */
+    Development = 2,
+
+    /**
+     * The extension is running from an `--extensionTestsPath` and
+     * the extension host is running unit tests.
+     */
+    Test = 3,
+}
+
 /**
  * Represents the validation type of the Source Control input.
  */
@@ -207,6 +230,7 @@ export enum SourceControlInputBoxValidationType {
     Information = 2
 }
 
+@es5ClassCompat
 export class ColorTheme implements theia.ColorTheme {
     constructor(public readonly kind: ColorThemeKind) { }
 }
@@ -233,6 +257,7 @@ export namespace TextEditorSelectionChangeKind {
     }
 }
 
+@es5ClassCompat
 export class Position {
     private _line: number;
     private _character: number;
@@ -388,8 +413,13 @@ export class Position {
         }
         return false;
     }
+
+    toJSON(): any {
+        return { line: this.line, character: this.character };
+    }
 }
 
+@es5ClassCompat
 export class Range {
     protected _start: Position;
     protected _end: Position;
@@ -519,8 +549,12 @@ export class Range {
             && Position.isPosition((<Range>thing).end);
     }
 
+    toJSON(): any {
+        return [this.start, this.end];
+    }
 }
 
+@es5ClassCompat
 export class Selection extends Range {
     private _anchor: Position;
     private _active: Position;
@@ -561,6 +595,22 @@ export class Selection extends Range {
     }
 }
 
+export namespace TextDocumentShowOptions {
+    /**
+     * @param candidate
+     * @returns `true` if `candidate` is an instance of options that includes a selection.
+     * This function should be used to determine whether TextDocumentOptions passed into commands by plugins
+     * need to be translated to TextDocumentShowOptions in the style of the RPC model. Selection is the only field that requires translation.
+     */
+    export function isTextDocumentShowOptions(candidate: unknown): candidate is theia.TextDocumentShowOptions {
+        if (!candidate) {
+            return false;
+        }
+        const options = candidate as theia.TextDocumentShowOptions;
+        return Range.isRange(options.selection);
+    }
+}
+
 export enum EndOfLine {
     LF = 1,
     CRLF = 2
@@ -572,6 +622,7 @@ export enum EnvironmentVariableMutatorType {
     Prepend = 3
 }
 
+@es5ClassCompat
 export class SnippetString {
 
     static isSnippetString(thing: {}): thing is SnippetString {
@@ -653,11 +704,13 @@ export class SnippetString {
     }
 }
 
+@es5ClassCompat
 export class ThemeColor {
     constructor(public id: string) {
     }
 }
 
+@es5ClassCompat
 export class ThemeIcon {
 
     static readonly File: ThemeIcon = new ThemeIcon('file');
@@ -667,6 +720,12 @@ export class ThemeIcon {
     private constructor(public id: string) {
     }
 
+}
+
+export namespace ThemeIcon {
+    export function is(item: unknown): item is ThemeIcon {
+        return typeof item === 'object' && !!item && 'id' in item;
+    }
 }
 
 export enum TextEditorRevealType {
@@ -716,6 +775,7 @@ export enum ConfigurationTarget {
     Memory
 }
 
+@es5ClassCompat
 export class RelativePattern {
 
     base: string;
@@ -746,6 +806,7 @@ export enum IndentAction {
     Outdent = 3
 }
 
+@es5ClassCompat
 export class TextEdit {
 
     protected _range: Range;
@@ -851,9 +912,12 @@ export enum CompletionItemKind {
     Struct = 21,
     Event = 22,
     Operator = 23,
-    TypeParameter = 24
+    TypeParameter = 24,
+    User = 25,
+    Issue = 26
 }
 
+@es5ClassCompat
 export class CompletionItem implements theia.CompletionItem {
 
     label: string;
@@ -876,6 +940,7 @@ export class CompletionItem implements theia.CompletionItem {
     }
 }
 
+@es5ClassCompat
 export class CompletionList {
 
     isIncomplete?: boolean;
@@ -900,16 +965,7 @@ export enum DebugConsoleMode {
     MergeWithParent = 1
 }
 
-export class DiagnosticRelatedInformation {
-    location: Location;
-    message: string;
-
-    constructor(location: Location, message: string) {
-        this.location = location;
-        this.message = message;
-    }
-}
-
+@es5ClassCompat
 export class Location {
     uri: URI;
     range: Range;
@@ -935,14 +991,27 @@ export class Location {
     }
 }
 
+@es5ClassCompat
+export class DiagnosticRelatedInformation {
+    location: Location;
+    message: string;
+
+    constructor(location: Location, message: string) {
+        this.location = location;
+        this.message = message;
+    }
+}
+
 export enum DiagnosticTag {
     Unnecessary = 1,
+    Deprecated = 2,
 }
 
 export enum CompletionItemTag {
     Deprecated = 1,
 }
 
+@es5ClassCompat
 export class Diagnostic {
     range: Range;
     message: string;
@@ -968,8 +1037,10 @@ export enum MarkerSeverity {
 
 export enum MarkerTag {
     Unnecessary = 1,
+    Deprecated = 2,
 }
 
+@es5ClassCompat
 export class ParameterInformation {
     label: string | [number, number];
     documentation?: string | MarkdownString;
@@ -980,6 +1051,7 @@ export class ParameterInformation {
     }
 }
 
+@es5ClassCompat
 export class SignatureInformation {
     label: string;
     documentation?: string | MarkdownString;
@@ -998,6 +1070,7 @@ export enum SignatureHelpTriggerKind {
     ContentChange = 3,
 }
 
+@es5ClassCompat
 export class SignatureHelp {
     signatures: SignatureInformation[];
     activeSignature: number;
@@ -1008,6 +1081,7 @@ export class SignatureHelp {
     }
 }
 
+@es5ClassCompat
 export class Hover {
 
     public contents: MarkdownString[] | theia.MarkedString[];
@@ -1037,6 +1111,7 @@ export enum DocumentHighlightKind {
     Write = 2
 }
 
+@es5ClassCompat
 export class DocumentHighlight {
 
     public range: Range;
@@ -1053,6 +1128,7 @@ export class DocumentHighlight {
 
 export type Definition = Location | Location[];
 
+@es5ClassCompat
 export class DocumentLink {
 
     range: Range;
@@ -1073,6 +1149,7 @@ export class DocumentLink {
     }
 }
 
+@es5ClassCompat
 export class CodeLens {
 
     range: Range;
@@ -1112,6 +1189,7 @@ export enum CodeActionTriggerKind {
     Automatic = 2,
 }
 
+@es5ClassCompat
 export class CodeActionKind {
     private static readonly sep = '.';
 
@@ -1148,6 +1226,7 @@ export enum TextDocumentSaveReason {
     FocusOut = 3
 }
 
+@es5ClassCompat
 export class CodeAction {
     title: string;
 
@@ -1200,6 +1279,7 @@ export interface FileTextEdit {
     metadata?: WorkspaceEditMetadata;
 }
 
+@es5ClassCompat
 export class WorkspaceEdit implements theia.WorkspaceEdit {
 
     private _edits = new Array<FileOperation | FileTextEdit | undefined>();
@@ -1312,6 +1392,7 @@ export class WorkspaceEdit implements theia.WorkspaceEdit {
     }
 }
 
+@es5ClassCompat
 export class TreeItem {
 
     label?: string | theia.TreeItemLabel;
@@ -1349,6 +1430,7 @@ export enum SymbolTag {
     Deprecated = 1
 }
 
+@es5ClassCompat
 export class SymbolInformation {
 
     static validate(candidate: SymbolInformation): void {
@@ -1393,6 +1475,7 @@ export class SymbolInformation {
     }
 }
 
+@es5ClassCompat
 export class DocumentSymbol {
 
     static validate(candidate: DocumentSymbol): void {
@@ -1432,20 +1515,19 @@ export enum CommentThreadCollapsibleState {
     Expanded = 1
 }
 
-export interface QuickInputButton {
-    readonly iconPath: URI | { light: string | URI; dark: string | URI } | ThemeIcon;
-    readonly tooltip?: string | undefined;
-}
-
+@es5ClassCompat
 export class QuickInputButtons {
-    static readonly Back: QuickInputButton = {
+    static readonly Back: theia.QuickInputButton = {
         iconPath: {
-            id: 'Back'
+            id: 'Back',
+            dark: '',
+            light: ''
         },
         tooltip: 'Back'
     };
 }
 
+@es5ClassCompat
 export class FileDecoration {
 
     static validate(d: FileDecoration): void {
@@ -1483,6 +1565,7 @@ export enum FileChangeType {
     Deleted = 3,
 }
 
+@es5ClassCompat
 export class FileSystemError extends Error {
 
     static FileExists(messageOrUri?: string | URI): FileSystemError {
@@ -1544,6 +1627,7 @@ export interface FileStat {
     readonly size: number;
 }
 
+@es5ClassCompat
 export class ProgressOptions {
     /**
      * The location at which progress should show.
@@ -1565,6 +1649,8 @@ export class ProgressOptions {
         this.location = location;
     }
 }
+
+@es5ClassCompat
 export class Progress<T> {
     /**
      * Report a progress update.
@@ -1590,6 +1676,7 @@ export enum ProgressLocation {
     Notification = 15
 }
 
+@es5ClassCompat
 export class ProcessExecution {
     private executionProcess: string;
     private arguments: string[];
@@ -1669,6 +1756,7 @@ export enum TaskRevealKind {
     Never = 3
 }
 
+@es5ClassCompat
 export class ShellExecution {
     private shellCommandLine: string;
     private shellCommand: string | theia.ShellQuotedString;
@@ -1742,17 +1830,18 @@ export class ShellExecution {
     }
 }
 
+@es5ClassCompat
 export class CustomExecution {
-    private _callback: (resolvedDefintion: theia.TaskDefinition) => Thenable<theia.Pseudoterminal>;
-    constructor(callback: (resolvedDefintion: theia.TaskDefinition) => Thenable<theia.Pseudoterminal>) {
+    private _callback: (resolvedDefinition: theia.TaskDefinition) => Thenable<theia.Pseudoterminal>;
+    constructor(callback: (resolvedDefinition: theia.TaskDefinition) => Thenable<theia.Pseudoterminal>) {
         this._callback = callback;
     }
 
-    public set callback(value: (resolvedDefintion: theia.TaskDefinition) => Thenable<theia.Pseudoterminal>) {
+    public set callback(value: (resolvedDefinition: theia.TaskDefinition) => Thenable<theia.Pseudoterminal>) {
         this._callback = value;
     }
 
-    public get callback(): ((resolvedDefintion: theia.TaskDefinition) => Thenable<theia.Pseudoterminal>) {
+    public get callback(): ((resolvedDefinition: theia.TaskDefinition) => Thenable<theia.Pseudoterminal>) {
         return this._callback;
     }
 
@@ -1762,6 +1851,7 @@ export class CustomExecution {
     }
 }
 
+@es5ClassCompat
 export class TaskGroup {
     private groupId: string;
 
@@ -1805,6 +1895,7 @@ export enum TaskScope {
     Workspace = 2
 }
 
+@es5ClassCompat
 export class Task {
     private taskDefinition: theia.TaskDefinition;
     private taskScope: theia.TaskScope.Global | theia.TaskScope.Workspace | theia.WorkspaceFolder | undefined;
@@ -1990,10 +2081,12 @@ export class Task {
     }
 }
 
+@es5ClassCompat
 export class Task2 extends Task {
     detail?: string;
 }
 
+@es5ClassCompat
 export class DebugAdapterExecutable {
     /**
      * The command or path of the debug adapter executable.
@@ -2027,9 +2120,16 @@ export class DebugAdapterExecutable {
     }
 }
 
+export namespace DebugAdapterExecutable {
+    export function is(adapter: theia.DebugAdapterDescriptor | undefined): adapter is theia.DebugAdapterExecutable {
+        return !!adapter && 'command' in adapter;
+    }
+}
+
 /**
  * Represents a debug adapter running as a socket based server.
  */
+@es5ClassCompat
 export class DebugAdapterServer {
 
     /**
@@ -2051,6 +2151,52 @@ export class DebugAdapterServer {
     }
 }
 
+export namespace DebugAdapterServer {
+    export function is(adapter: theia.DebugAdapterDescriptor | undefined): adapter is DebugAdapterServer {
+        return !!adapter && 'port' in adapter;
+    }
+}
+
+/**
+ * Represents a debug adapter running as a Named Pipe (on Windows)/UNIX Domain Socket (on non-Windows) based server.
+ */
+@es5ClassCompat
+export class DebugAdapterNamedPipeServer {
+    /**
+     * Create a description for a debug adapter running as a Named Pipe (on Windows)/UNIX Domain Socket (on non-Windows) based server.
+     */
+    constructor(readonly path: string) { }
+}
+
+export namespace DebugAdapterNamedPipeServer {
+    export function is(adapter: theia.DebugAdapterDescriptor | undefined): adapter is DebugAdapterNamedPipeServer {
+        return !!adapter && 'path' in adapter;
+    }
+}
+
+/**
+ * A debug adapter descriptor for an inline implementation.
+ */
+@es5ClassCompat
+export class DebugAdapterInlineImplementation {
+    implementation: theia.DebugAdapter;
+
+    /**
+     * Create a descriptor for an inline implementation of a debug adapter.
+     */
+    constructor(impl: theia.DebugAdapter) {
+        this.implementation = impl;
+    }
+}
+
+export namespace DebugAdapterInlineImplementation {
+    export function is(adapter: theia.DebugAdapterDescriptor | undefined): adapter is DebugAdapterInlineImplementation {
+        return !!adapter && 'implementation' in adapter;
+    }
+}
+
+export type DebugAdapterDescriptor = DebugAdapterExecutable | DebugAdapterServer | DebugAdapterNamedPipeServer | DebugAdapterInlineImplementation;
+
 export enum LogLevel {
     Trace = 1,
     Debug = 2,
@@ -2064,6 +2210,7 @@ export enum LogLevel {
 /**
  * The base class of all breakpoint types.
  */
+@es5ClassCompat
 export class Breakpoint {
     /**
      * Is breakpoint enabled.
@@ -2105,6 +2252,7 @@ export class Breakpoint {
 /**
  * A breakpoint specified by a source location.
  */
+@es5ClassCompat
 export class SourceBreakpoint extends Breakpoint {
     /**
      * The source and line position of this breakpoint.
@@ -2123,6 +2271,7 @@ export class SourceBreakpoint extends Breakpoint {
 /**
  * A breakpoint specified by a function name.
  */
+@es5ClassCompat
 export class FunctionBreakpoint extends Breakpoint {
     /**
      * The name of the function to which this breakpoint is attached.
@@ -2138,6 +2287,7 @@ export class FunctionBreakpoint extends Breakpoint {
     }
 }
 
+@es5ClassCompat
 export class Color {
     readonly red: number;
     readonly green: number;
@@ -2152,6 +2302,7 @@ export class Color {
     }
 }
 
+@es5ClassCompat
 export class ColorInformation {
     range: Range;
     color: Color;
@@ -2168,6 +2319,7 @@ export class ColorInformation {
     }
 }
 
+@es5ClassCompat
 export class ColorPresentation {
     label: string;
     textEdit?: TextEdit;
@@ -2187,6 +2339,7 @@ export enum ColorFormat {
     HSL = 2
 }
 
+@es5ClassCompat
 export class FoldingRange {
     start: number;
     end: number;
@@ -2205,6 +2358,7 @@ export enum FoldingRangeKind {
     Region = 3
 }
 
+@es5ClassCompat
 export class SelectionRange {
 
     range: Range;
@@ -2253,6 +2407,7 @@ export enum UIKind {
     Web = 2
 }
 
+@es5ClassCompat
 export class CallHierarchyItem {
     _sessionId?: string;
     _itemId?: string;
@@ -2263,6 +2418,7 @@ export class CallHierarchyItem {
     uri: URI;
     range: Range;
     selectionRange: Range;
+    tags?: readonly SymbolTag[];
 
     constructor(kind: SymbolKind, name: string, detail: string, uri: URI, range: Range, selectionRange: Range) {
         this.kind = kind;
@@ -2288,28 +2444,31 @@ export class CallHierarchyItem {
     }
 }
 
+@es5ClassCompat
 export class CallHierarchyIncomingCall {
 
     from: theia.CallHierarchyItem;
     fromRanges: theia.Range[];
 
-    constructor(item: theia.CallHierarchyItem, fromRanges: theia.Range[]) {
+    constructor(item: CallHierarchyItem, fromRanges: Range[]) {
         this.fromRanges = fromRanges;
         this.from = item;
     }
 }
 
+@es5ClassCompat
 export class CallHierarchyOutgoingCall {
 
     to: theia.CallHierarchyItem;
     fromRanges: theia.Range[];
 
-    constructor(item: theia.CallHierarchyItem, fromRanges: theia.Range[]) {
+    constructor(item: CallHierarchyItem, fromRanges: Range[]) {
         this.fromRanges = fromRanges;
         this.to = item;
     }
 }
 
+@es5ClassCompat
 export class TimelineItem {
     timestamp: number;
     label: string;
@@ -2327,6 +2486,7 @@ export class TimelineItem {
 
 // #region Semantic Coloring
 
+@es5ClassCompat
 export class SemanticTokensLegend {
     public readonly tokenTypes: string[];
     public readonly tokenModifiers: string[];
@@ -2341,6 +2501,7 @@ function isStrArrayOrUndefined(arg: any): arg is string[] | undefined {
     return ((typeof arg === 'undefined') || (Array.isArray(arg) && arg.every(e => typeof e === 'string')));
 }
 
+@es5ClassCompat
 export class SemanticTokensBuilder {
 
     private _prevLine: number;
@@ -2352,7 +2513,7 @@ export class SemanticTokensBuilder {
     private _tokenModifierStrToInt: Map<string, number>;
     private _hasLegend: boolean;
 
-    constructor(legend?: theia.SemanticTokensLegend) {
+    constructor(legend?: SemanticTokensLegend) {
         this._prevLine = 0;
         this._prevChar = 0;
         this._dataIsSortedAndDeltaEncoded = true;
@@ -2520,6 +2681,7 @@ export class SemanticTokensBuilder {
     }
 }
 
+@es5ClassCompat
 export class SemanticTokens {
     readonly resultId?: string;
     readonly data: Uint32Array;
@@ -2530,6 +2692,7 @@ export class SemanticTokens {
     }
 }
 
+@es5ClassCompat
 export class SemanticTokensEdit {
     readonly start: number;
     readonly deleteCount: number;
@@ -2542,6 +2705,7 @@ export class SemanticTokensEdit {
     }
 }
 
+@es5ClassCompat
 export class SemanticTokensEdits {
     readonly resultId?: string;
     readonly edits: SemanticTokensEdit[];

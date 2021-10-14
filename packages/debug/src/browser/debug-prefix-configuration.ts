@@ -14,12 +14,8 @@
  * SPDX-License-Identifier: EPL-2.0 OR GPL-2.0 WITH Classpath-exception-2.0
  ********************************************************************************/
 
-import { inject, injectable, postConstruct } from '@theia/core/shared/inversify';
+import { inject, injectable, optional, postConstruct } from '@theia/core/shared/inversify';
 import { Command, CommandContribution, CommandHandler, CommandRegistry } from '@theia/core/lib/common/command';
-import {
-    QuickOpenContribution, QuickOpenHandler, QuickOpenModel,
-    PrefixQuickOpenService, QuickOpenOptions, QuickOpenHandlerRegistry, QuickOpenItem, QuickOpenMode
-} from '@theia/core/lib/browser/quick-open';
 import { DebugSessionManager } from './debug-session-manager';
 import { DebugConfigurationManager } from './debug-configuration-manager';
 import { DebugCommands } from './debug-frontend-application-contribution';
@@ -27,11 +23,14 @@ import { DebugSessionOptions } from './debug-session-options';
 import { WorkspaceService } from '@theia/workspace/lib/browser';
 import { LabelProvider } from '@theia/core/lib/browser/label-provider';
 import URI from '@theia/core/lib/common/uri';
-import { StatusBar, StatusBarAlignment } from '@theia/core/lib/browser';
+import { QuickAccessContribution, QuickAccessProvider, QuickAccessRegistry, QuickInputService, StatusBar, StatusBarAlignment } from '@theia/core/lib/browser';
 import { DebugPreferences } from './debug-preferences';
+import { filterItems, QuickPickItem, QuickPicks } from '@theia/core/lib/browser/quick-input/quick-input-service';
+import { CancellationToken } from '@theia/core/lib/common';
 
 @injectable()
-export class DebugPrefixConfiguration implements CommandContribution, CommandHandler, QuickOpenContribution, QuickOpenHandler, QuickOpenModel {
+export class DebugPrefixConfiguration implements CommandContribution, CommandHandler, QuickAccessContribution, QuickAccessProvider {
+    static readonly PREFIX = 'debug ';
 
     @inject(CommandRegistry)
     protected readonly commandRegistry: CommandRegistry;
@@ -45,8 +44,11 @@ export class DebugPrefixConfiguration implements CommandContribution, CommandHan
     @inject(DebugConfigurationManager)
     protected readonly debugConfigurationManager: DebugConfigurationManager;
 
-    @inject(PrefixQuickOpenService)
-    protected readonly prefixQuickOpenService: PrefixQuickOpenService;
+    @inject(QuickInputService) @optional()
+    protected readonly quickInputService: QuickInputService;
+
+    @inject(QuickAccessRegistry)
+    protected readonly quickAccessRegistry: QuickAccessRegistry;
 
     @inject(WorkspaceService)
     protected readonly workspaceService: WorkspaceService;
@@ -57,8 +59,6 @@ export class DebugPrefixConfiguration implements CommandContribution, CommandHan
     @inject(StatusBar)
     protected readonly statusBar: StatusBar;
 
-    readonly prefix = 'debug ';
-    readonly description = 'Debug Configuration';
     readonly statusBarId = 'select-run-debug-statusbar-item';
 
     private readonly command: Command = {
@@ -83,7 +83,7 @@ export class DebugPrefixConfiguration implements CommandContribution, CommandHan
     }
 
     execute(): void {
-        this.prefixQuickOpenService.open(this.prefix);
+        this.quickInputService?.open(DebugPrefixConfiguration.PREFIX);
     }
 
     isEnabled(): boolean {
@@ -94,44 +94,53 @@ export class DebugPrefixConfiguration implements CommandContribution, CommandHan
         return true;
     }
 
-    getModel(): QuickOpenModel {
-        return this;
-    }
-
-    getOptions(): QuickOpenOptions {
-        return {
-            fuzzyMatchLabel: true,
-            fuzzySort: false,
-        };
-    }
-
     registerCommands(commands: CommandRegistry): void {
         commands.registerCommand(this.command, this);
     }
 
-    registerQuickOpenHandlers(handlers: QuickOpenHandlerRegistry): void {
-        handlers.registerHandler(this);
+    registerQuickAccessProvider(): void {
+        this.quickAccessRegistry.registerQuickAccessProvider({
+            getInstance: () => this,
+            prefix: DebugPrefixConfiguration.PREFIX,
+            placeholder: '',
+            helpEntries: [{ description: 'Debug Configuration', needsEditor: false }]
+        });
     }
 
-    async onType(_lookFor: string, acceptor: (items: QuickOpenItem[]) => void): Promise<void> {
-        const items: QuickOpenItem[] = [];
+    async getPicks(filter: string, token: CancellationToken): Promise<QuickPicks> {
+        const items: QuickPickItem[] = [];
         const configurations = this.debugConfigurationManager.all;
-        Array.from(configurations).forEach(config => {
-            items.push(new QuickOpenItem({
+
+        for (const config of configurations) {
+            items.push({
                 label: config.configuration.name,
                 description: this.workspaceService.isMultiRootWorkspaceOpened
                     ? this.labelProvider.getName(new URI(config.workspaceFolderUri))
                     : '',
-                run: (mode: QuickOpenMode) => {
-                    if (mode !== QuickOpenMode.OPEN) {
-                        return false;
-                    }
-                    this.runConfiguration(config);
-                    return true;
-                }
-            }));
-        });
-        acceptor(items);
+                execute: () => this.runConfiguration(config)
+            });
+        }
+
+        // Resolve dynamic configurations from providers
+        const configurationsByType = await this.debugConfigurationManager.provideDynamicDebugConfigurations();
+        for (const typeConfigurations of configurationsByType) {
+            const dynamicConfigurations = typeConfigurations.configurations;
+            if (dynamicConfigurations.length > 0) {
+                items.push({
+                    label: typeConfigurations.type,
+                    type: 'separator'
+                });
+            }
+
+            for (const configuration of dynamicConfigurations) {
+                items.push({
+                    label: configuration.name,
+                    execute: () => this.runConfiguration({configuration})
+                });
+            }
+        }
+
+        return filterItems(items, filter);
     }
 
     /**
@@ -164,7 +173,7 @@ export class DebugPrefixConfiguration implements CommandContribution, CommandHan
         const text: string = this.debugConfigurationManager.current
             ? this.debugConfigurationManager.current.configuration.name
             : '';
-        const icon = '$(play)';
+        const icon = '$(codicon-debug-alt-small)';
         this.statusBar.setElement(this.statusBarId, {
             alignment: StatusBarAlignment.LEFT,
             text: text.length ? `${icon} ${text}` : icon,

@@ -29,8 +29,9 @@ import { TaskProviderAdapter } from './task-provider';
 import { Emitter, Event } from '@theia/core/lib/common/event';
 import { TerminalServiceExtImpl } from '../terminal-ext';
 import { UUID } from '@theia/core/shared/@phosphor/coreutils';
+import { CancellationToken } from '@theia/core/lib/common/cancellation';
 
-type ExecutionCallback = (resolvedDefintion: theia.TaskDefinition) => Thenable<theia.Pseudoterminal>;
+type ExecutionCallback = (resolvedDefinition: theia.TaskDefinition) => Thenable<theia.Pseudoterminal>;
 export class TasksExtImpl implements TasksExt {
     private proxy: TasksMain;
 
@@ -164,10 +165,10 @@ export class TasksExtImpl implements TasksExt {
         throw new Error('Task was not successfully transformed into a task config');
     }
 
-    $provideTasks(handle: number, token: theia.CancellationToken): Promise<TaskDto[] | undefined> {
+    $provideTasks(handle: number): Promise<TaskDto[] | undefined> {
         const adapter = this.adaptersMap.get(handle);
         if (adapter) {
-            return adapter.provideTasks(token).then(tasks => {
+            return adapter.provideTasks(CancellationToken.None).then(tasks => {
                 if (tasks) {
                     for (const task of tasks) {
                         if (task.taskType === 'customExecution') {

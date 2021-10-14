@@ -14,7 +14,7 @@
  * SPDX-License-Identifier: EPL-2.0 OR GPL-2.0 WITH Classpath-exception-2.0
  ********************************************************************************/
 
-import { injectable, inject, named } from '@theia/core/shared/inversify';
+import { injectable, inject, named, optional } from '@theia/core/shared/inversify';
 import { MenuModelRegistry, CommandRegistry } from '@theia/core';
 import {
     CommonMenus,
@@ -25,6 +25,8 @@ import {
     PreferenceScope,
     PreferenceProvider,
     PreferenceService,
+    QuickInputService,
+    QuickPickItem,
 } from '@theia/core/lib/browser';
 import { isFirefox } from '@theia/core/lib/browser';
 import { isOSX } from '@theia/core/lib/common/os';
@@ -36,6 +38,8 @@ import { WorkspacePreferenceProvider } from './workspace-preference-provider';
 import { Preference, PreferencesCommands, PreferenceMenus } from './util/preference-types';
 import { ClipboardService } from '@theia/core/lib/browser/clipboard-service';
 import { FileService } from '@theia/filesystem/lib/browser/file-service';
+import { WorkspaceService } from '@theia/workspace/lib/browser';
+import { FileStat } from '@theia/filesystem/lib/common/files';
 
 @injectable()
 export class PreferencesContribution extends AbstractViewContribution<PreferencesWidget> {
@@ -46,6 +50,8 @@ export class PreferencesContribution extends AbstractViewContribution<Preference
     @inject(PreferenceService) protected readonly preferenceService: PreferenceService;
     @inject(ClipboardService) protected readonly clipboardService: ClipboardService;
     @inject(PreferencesWidget) protected readonly scopeTracker: PreferencesWidget;
+    @inject(WorkspaceService) protected readonly workspaceService: WorkspaceService;
+    @inject(QuickInputService) @optional() protected readonly quickInputService: QuickInputService;
 
     constructor() {
         super({
@@ -59,13 +65,18 @@ export class PreferencesContribution extends AbstractViewContribution<Preference
 
     registerCommands(commands: CommandRegistry): void {
         commands.registerCommand(CommonCommands.OPEN_PREFERENCES, {
-            execute: () => this.openView({ activate: true }),
+            execute: async (query?: string) => {
+                const widget = await this.openView({ activate: true });
+                if (typeof query === 'string') {
+                    widget.setSearchTerm(query);
+                }
+            },
         });
         commands.registerCommand(PreferencesCommands.OPEN_PREFERENCES_JSON_TOOLBAR, {
             isEnabled: () => true,
             isVisible: w => this.withWidget(w, () => true),
-            execute: (preferenceNode: Preference.NodeWithValueInAllScopes) => {
-                this.openPreferencesJSON(preferenceNode);
+            execute: (preferenceId: string) => {
+                this.openPreferencesJSON(preferenceId);
             }
         });
         commands.registerCommand(PreferencesCommands.COPY_JSON_NAME, {
@@ -89,6 +100,41 @@ export class PreferencesContribution extends AbstractViewContribution<Preference
             execute: ({ id }: Preference.EditorCommandArgs) => {
                 this.preferenceService.set(id, undefined, Number(this.scopeTracker.currentScope.scope), this.scopeTracker.currentScope.uri);
             }
+        });
+        commands.registerCommand(PreferencesCommands.OPEN_USER_PREFERENCES, {
+            execute: async () => {
+                const widget = await this.openView({ activate: true });
+                widget.setScope(PreferenceScope.User);
+            }
+        });
+        commands.registerCommand(PreferencesCommands.OPEN_WORKSPACE_PREFERENCES, {
+            isEnabled: () => !!this.workspaceService.workspace,
+            isVisible: () => !!this.workspaceService.workspace,
+            execute: async () => {
+                const widget = await this.openView({ activate: true });
+                widget.setScope(PreferenceScope.Workspace);
+            }
+        });
+        commands.registerCommand(PreferencesCommands.OPEN_FOLDER_PREFERENCES, {
+            isEnabled: () => !!this.workspaceService.isMultiRootWorkspaceOpened && this.workspaceService.tryGetRoots().length > 0,
+            isVisible: () => !!this.workspaceService.isMultiRootWorkspaceOpened && this.workspaceService.tryGetRoots().length > 0,
+            execute: () => this.openFolderPreferences(root => {
+                this.openView({ activate: true });
+                this.scopeTracker.setScope(root.resource);
+            })
+        });
+        commands.registerCommand(PreferencesCommands.OPEN_USER_PREFERENCES_JSON, {
+            execute: async () => this.openJson(PreferenceScope.User)
+        });
+        commands.registerCommand(PreferencesCommands.OPEN_WORKSPACE_PREFERENCES_JSON, {
+            isEnabled: () => !!this.workspaceService.workspace,
+            isVisible: () => !!this.workspaceService.workspace,
+            execute: async () => this.openJson(PreferenceScope.Workspace)
+        });
+        commands.registerCommand(PreferencesCommands.OPEN_FOLDER_PREFERENCES_JSON, {
+            isEnabled: () => !!this.workspaceService.isMultiRootWorkspaceOpened && this.workspaceService.tryGetRoots().length > 0,
+            isVisible: () => !!this.workspaceService.isMultiRootWorkspaceOpened && this.workspaceService.tryGetRoots().length > 0,
+            execute: () => this.openFolderPreferences(root => this.openJson(PreferenceScope.Folder, root.resource.toString()))
         });
     }
 
@@ -136,15 +182,14 @@ export class PreferencesContribution extends AbstractViewContribution<Preference
         });
     }
 
-    protected async openPreferencesJSON(preferenceNode: Preference.NodeWithValueInAllScopes): Promise<void> {
-        const wasOpenedFromEditor = preferenceNode.constructor !== PreferencesWidget;
+    protected async openPreferencesJSON(opener: string | PreferencesWidget): Promise<void> {
         const { scope, activeScopeIsFolder, uri } = this.scopeTracker.currentScope;
         const scopeID = Number(scope);
-        const preferenceId = wasOpenedFromEditor ? preferenceNode.id : '';
-        // when opening from toolbar, widget is passed as arg by default (we don't need this info)
-        if (wasOpenedFromEditor && preferenceNode.preference.values) {
-            const currentPreferenceValue = preferenceNode.preference.values;
-            const valueInCurrentScope = Preference.getValueInScope(currentPreferenceValue, scopeID) ?? currentPreferenceValue.defaultValue;
+        let preferenceId = '';
+        if (typeof opener === 'string') {
+            preferenceId = opener;
+            const currentPreferenceValue = this.preferenceService.inspect(preferenceId, uri);
+            const valueInCurrentScope = Preference.getValueInScope(currentPreferenceValue, scopeID) ?? currentPreferenceValue?.defaultValue;
             this.preferenceService.set(preferenceId, valueInCurrentScope, scopeID, uri);
         }
 
@@ -153,7 +198,7 @@ export class PreferencesContribution extends AbstractViewContribution<Preference
         if (jsonUriToOpen) {
             jsonEditorWidget = await this.editorManager.open(jsonUriToOpen);
 
-            if (wasOpenedFromEditor) {
+            if (preferenceId) {
                 const text = jsonEditorWidget.editor.document.getText();
                 if (preferenceId) {
                     const { index } = text.match(preferenceId)!;
@@ -164,9 +209,33 @@ export class PreferencesContribution extends AbstractViewContribution<Preference
         }
     }
 
-    private async obtainConfigUri(serializedScope: number, activeScopeIsFolder: string, resource: string): Promise<URI | undefined> {
+    protected async openJson(scope: PreferenceScope, resource?: string): Promise<void> {
+        const jsonUriToOpen = await this.obtainConfigUri(scope, false, resource);
+        if (jsonUriToOpen) {
+            await this.editorManager.open(jsonUriToOpen);
+        }
+    }
+
+    /**
+     * Prompts which workspace root folder to open the JSON settings.
+     */
+    protected async openFolderPreferences(callback: (root: FileStat) => unknown): Promise<void> {
+        const roots = this.workspaceService.tryGetRoots();
+        if (roots.length === 1) {
+            callback(roots[0]);
+        } else {
+            const items: QuickPickItem[] = roots.map(root => ({
+                label: root.name,
+                description: root.resource.path.toString(),
+                execute: () => callback(root)
+            }));
+            this.quickInputService?.showQuickPick(items, { placeholder: 'Select workspace folder' });
+        }
+    }
+
+    private async obtainConfigUri(serializedScope: number, activeScopeIsFolder: boolean, resource?: string): Promise<URI | undefined> {
         let scope: PreferenceScope = serializedScope;
-        if (activeScopeIsFolder === 'true') {
+        if (activeScopeIsFolder) {
             scope = PreferenceScope.Folder;
         }
         const resourceUri = !!resource ? resource : undefined;

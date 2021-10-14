@@ -20,17 +20,18 @@ import { ContainerModule, interfaces } from '@theia/core/shared/inversify';
 import { SearchInWorkspaceService, SearchInWorkspaceClientImpl } from './search-in-workspace-service';
 import { SearchInWorkspaceServer, SIW_WS_PATH } from '../common/search-in-workspace-interface';
 import {
-    WebSocketConnectionProvider, WidgetFactory, createTreeContainer, TreeWidget, bindViewContribution, FrontendApplicationContribution, LabelProviderContribution
+    WebSocketConnectionProvider, WidgetFactory, createTreeContainer, TreeWidget, bindViewContribution, FrontendApplicationContribution, LabelProviderContribution,
+    ApplicationShellLayoutMigration
 } from '@theia/core/lib/browser';
-import { ResourceResolver } from '@theia/core';
 import { SearchInWorkspaceWidget } from './search-in-workspace-widget';
 import { SearchInWorkspaceResultTreeWidget } from './search-in-workspace-result-tree-widget';
 import { SearchInWorkspaceFrontendContribution } from './search-in-workspace-frontend-contribution';
-import { InMemoryTextResourceResolver } from './in-memory-text-resource';
 import { SearchInWorkspaceContextKeyService } from './search-in-workspace-context-key-service';
 import { TabBarToolbarContribution } from '@theia/core/lib/browser/shell/tab-bar-toolbar';
 import { bindSearchInWorkspacePreferences } from './search-in-workspace-preferences';
 import { SearchInWorkspaceLabelProvider } from './search-in-workspace-label-provider';
+import { SearchInWorkspaceFactory } from './search-in-workspace-factory';
+import { SearchLayoutVersion3Migration } from './search-layout-migrations';
 
 export default new ContainerModule(bind => {
     bind(SearchInWorkspaceContextKeyService).toSelf().inSingletonScope();
@@ -41,6 +42,9 @@ export default new ContainerModule(bind => {
         createWidget: () => ctx.container.get(SearchInWorkspaceWidget)
     }));
     bind(SearchInWorkspaceResultTreeWidget).toDynamicValue(ctx => createSearchTreeWidget(ctx.container));
+    bind(SearchInWorkspaceFactory).toSelf().inSingletonScope();
+    bind(WidgetFactory).toService(SearchInWorkspaceFactory);
+    bind(ApplicationShellLayoutMigration).to(SearchLayoutVersion3Migration).inSingletonScope();
 
     bindViewContribution(bind, SearchInWorkspaceFrontendContribution);
     bind(FrontendApplicationContribution).toService(SearchInWorkspaceFrontendContribution);
@@ -56,9 +60,6 @@ export default new ContainerModule(bind => {
         const client = ctx.container.get(SearchInWorkspaceClientImpl);
         return WebSocketConnectionProvider.createProxy(ctx.container, SIW_WS_PATH, client);
     }).inSingletonScope();
-
-    bind(InMemoryTextResourceResolver).toSelf().inSingletonScope();
-    bind(ResourceResolver).toService(InMemoryTextResourceResolver);
 
     bindSearchInWorkspacePreferences(bind);
 

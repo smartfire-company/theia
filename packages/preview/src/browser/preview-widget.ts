@@ -18,7 +18,7 @@ import throttle = require('@theia/core/shared/lodash.throttle');
 import { inject, injectable } from '@theia/core/shared/inversify';
 import { Resource, MaybePromise } from '@theia/core';
 import { Navigatable } from '@theia/core/lib/browser/navigatable';
-import { BaseWidget, Message, addEventListener } from '@theia/core/lib/browser';
+import { BaseWidget, Message, addEventListener, codicon } from '@theia/core/lib/browser';
 import URI from '@theia/core/lib/common/uri';
 import { Event, Emitter } from '@theia/core/lib/common';
 import { PreviewHandler, PreviewHandlerProvider } from './preview-handler';
@@ -30,7 +30,7 @@ import { Range, Location } from '@theia/core/shared/vscode-languageserver-types'
 
 export const PREVIEW_WIDGET_CLASS = 'theia-preview-widget';
 
-const DEFAULT_ICON = 'fa fa-eye';
+const DEFAULT_ICON = codicon('eye');
 
 let widgetCounter: number = 0;
 
@@ -99,7 +99,7 @@ export class PreviewWidget extends BaseWidget implements Navigatable {
         this.toDispose.push(this.workspace.onDidOpenTextDocument(document => updateIfAffected(document.uri)));
         this.toDispose.push(this.workspace.onDidChangeTextDocument(params => updateIfAffected(params.model.uri)));
         this.toDispose.push(this.workspace.onDidCloseTextDocument(document => updateIfAffected(document.uri)));
-        this.toDispose.push(this.themeService.onThemeChange(() => this.update()));
+        this.toDispose.push(this.themeService.onDidColorThemeChange(() => this.update()));
         this.firstUpdate = () => {
             this.revealFragment(this.uri);
         };

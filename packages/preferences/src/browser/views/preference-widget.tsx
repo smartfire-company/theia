@@ -15,14 +15,13 @@
  ********************************************************************************/
 
 import { postConstruct, injectable, inject } from '@theia/core/shared/inversify';
-import { Panel, Widget, Message, StatefulWidget } from '@theia/core/lib/browser';
+import { Panel, Widget, Message, StatefulWidget, PreferenceScope, codicon } from '@theia/core/lib/browser';
 import { PreferencesEditorState, PreferencesEditorWidget } from './preference-editor-widget';
 import { PreferencesTreeWidget } from './preference-tree-widget';
 import { PreferencesSearchbarState, PreferencesSearchbarWidget } from './preference-searchbar-widget';
 import { PreferencesScopeTabBar, PreferencesScopeTabBarState } from './preference-scope-tabbar-widget';
 import { Preference } from '../util/preference-types';
-
-const SHADOW_CLASSNAME = 'with-shadow';
+import URI from '@theia/core/lib/common/uri';
 
 interface PreferencesWidgetState {
     scopeTabBarState: PreferencesScopeTabBarState,
@@ -50,6 +49,14 @@ export class PreferencesWidget extends Panel implements StatefulWidget {
         return this.tabBarWidget.currentScope;
     }
 
+    setSearchTerm(query: string): void {
+        this.searchbarWidget.updateSearchTerm(query);
+    }
+
+    setScope(scope: PreferenceScope.User | PreferenceScope.Workspace | URI): void {
+        this.tabBarWidget.setScope(scope);
+    }
+
     protected onResize(msg: Widget.ResizeMessage): void {
         super.onResize(msg);
         if (msg.width < 600 && this.treeWidget && !this.treeWidget.isHidden) {
@@ -72,7 +79,7 @@ export class PreferencesWidget extends Panel implements StatefulWidget {
         this.title.label = PreferencesWidget.LABEL;
         this.title.closable = true;
         this.addClass('theia-settings-container');
-        this.title.iconClass = 'fa fa-sliders';
+        this.title.iconClass = codicon('settings');
 
         this.searchbarWidget.addClass('preferences-searchbar-widget');
         this.addWidget(this.searchbarWidget);
@@ -85,13 +92,6 @@ export class PreferencesWidget extends Panel implements StatefulWidget {
 
         this.editorWidget.addClass('preferences-editor-widget');
         this.addWidget(this.editorWidget);
-        this.editorWidget.onEditorDidScroll(editorIsAtTop => {
-            if (editorIsAtTop) {
-                this.tabBarWidget.removeClass(SHADOW_CLASSNAME);
-            } else {
-                this.tabBarWidget.addClass(SHADOW_CLASSNAME);
-            }
-        });
 
         this.update();
     }

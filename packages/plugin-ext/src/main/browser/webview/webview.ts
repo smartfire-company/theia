@@ -40,7 +40,7 @@ import { Schemes } from '../../../common/uri-components';
 import { PluginSharedStyle } from '../plugin-shared-style';
 import { WebviewThemeDataProvider } from './webview-theme-data-provider';
 import { ExternalUriService } from '@theia/core/lib/browser/external-uri-service';
-import { OutputChannelManager } from '@theia/output/lib/common/output-channel';
+import { OutputChannelManager } from '@theia/output/lib/browser/output-channel';
 import { WebviewPreferences } from './webview-preferences';
 import { WebviewResourceCache } from './webview-resource-cache';
 import { Endpoint } from '@theia/core/lib/browser/endpoint';
@@ -249,7 +249,7 @@ export class WebviewWidget extends BaseWidget implements StatefulWidget {
 
         const element = document.createElement('iframe');
         element.className = 'webview';
-        element.sandbox.add('allow-scripts', 'allow-forms', 'allow-same-origin');
+        element.sandbox.add('allow-scripts', 'allow-forms', 'allow-same-origin', 'allow-downloads');
         element.setAttribute('src', `${this.externalEndpoint}/index.html?id=${this.identifier.id}`);
         element.style.border = 'none';
         element.style.width = '100%';
@@ -383,12 +383,16 @@ export class WebviewWidget extends BaseWidget implements StatefulWidget {
             const iconClass = `webview-${this.identifier.id}-file-icon`;
             this.toDisposeOnIcon.push(this.sharedStyle.insertRule(
                 `.theia-webview-icon.${iconClass}::before`,
-                theme => `background-image: url(${theme.type === 'light' ? lightIconUrl : darkIconUrl});`
+                theme => `background-image: url(${this.toEndpoint(theme.type === 'light' ? lightIconUrl : darkIconUrl)});`
             ));
             this.title.iconClass = `theia-webview-icon ${iconClass}`;
         } else {
             this.title.iconClass = '';
         }
+    }
+
+    protected toEndpoint(pathname: string): string {
+        return new Endpoint({ path: pathname }).getRestUrl().toString();
     }
 
     setHTML(value: string): void {

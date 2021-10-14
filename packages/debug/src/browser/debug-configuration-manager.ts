@@ -26,7 +26,7 @@ import URI from '@theia/core/lib/common/uri';
 import { Emitter, Event, WaitUntilEvent } from '@theia/core/lib/common/event';
 import { EditorManager, EditorWidget } from '@theia/editor/lib/browser';
 import { MonacoEditor } from '@theia/monaco/lib/browser/monaco-editor';
-import { PreferenceService, StorageService, PreferenceScope } from '@theia/core/lib/browser';
+import { PreferenceScope, PreferenceService, QuickPickValue, StorageService } from '@theia/core/lib/browser';
 import { QuickPickService } from '@theia/core/lib/common/quick-pick-service';
 import { WorkspaceService } from '@theia/workspace/lib/browser/workspace-service';
 import { DebugConfigurationModel } from './debug-configuration-model';
@@ -51,7 +51,7 @@ export class DebugConfigurationManager {
     @inject(DebugService)
     protected readonly debug: DebugService;
     @inject(QuickPickService)
-    protected readonly quickPick: QuickPickService;
+    protected readonly quickPickService: QuickPickService;
 
     @inject(ContextKeyService)
     protected readonly contextKeyService: ContextKeyService;
@@ -74,12 +74,18 @@ export class DebugConfigurationManager {
     protected readonly onWillProvideDebugConfigurationEmitter = new Emitter<WillProvideDebugConfiguration>();
     readonly onWillProvideDebugConfiguration: Event<WillProvideDebugConfiguration> = this.onWillProvideDebugConfigurationEmitter.event;
 
+    protected readonly onWillProvideDynamicDebugConfigurationEmitter = new Emitter<WillProvideDebugConfiguration>();
+    get onWillProvideDynamicDebugConfiguration(): Event<WillProvideDebugConfiguration> {
+        return this.onWillProvideDynamicDebugConfigurationEmitter.event;
+    }
+
     protected debugConfigurationTypeKey: ContextKey<string>;
 
     protected initialized: Promise<void>;
     @postConstruct()
     protected async init(): Promise<void> {
         this.debugConfigurationTypeKey = this.contextKeyService.createKey<string>('debugConfigurationType', undefined);
+        await this.preferences.ready;
         this.initialized = this.updateModels();
         this.preferences.onPreferenceChanged(e => {
             if (e.preferenceName === 'launch') {
@@ -149,8 +155,8 @@ export class DebugConfigurationManager {
         this.updateCurrent(option);
     }
     protected updateCurrent(options: DebugSessionOptions | undefined = this._currentOptions): void {
-        this._currentOptions = options
-            && this.find(options.configuration.name, options.workspaceFolderUri);
+        this._currentOptions = options && !options.configuration.dynamic ? this.find(options.configuration.name, options.workspaceFolderUri) : options;
+
         if (!this._currentOptions) {
             const { model } = this;
             if (model) {
@@ -188,6 +194,7 @@ export class DebugConfigurationManager {
             await this.doOpen(model);
         }
     }
+
     async addConfiguration(): Promise<void> {
         const { model } = this;
         if (!model) {
@@ -265,7 +272,11 @@ export class DebugConfigurationManager {
         if (!uri) { // Since we are requesting information about a known workspace folder, this should never happen.
             throw new Error('PreferenceService.getConfigUri has returned undefined when a URI was expected.');
         }
-        await this.ensureContent(uri, model);
+        const settingsUri = this.preferences.getConfigUri(PreferenceScope.Folder, model.workspaceFolderUri);
+        // Users may have placed their debug configurations in a `settings.json`, in which case we shouldn't modify the file.
+        if (settingsUri && !uri.isEqual(settingsUri)) {
+            await this.ensureContent(uri, model);
+        }
         return uri;
     }
 
@@ -275,7 +286,7 @@ export class DebugConfigurationManager {
      */
     protected async ensureContent(uri: URI, model: DebugConfigurationModel): Promise<void> {
         const textModel = await this.textModelService.createModelReference(uri);
-        const currentContent = textModel.object.getText();
+        const currentContent = textModel.object.valid ? textModel.object.getText() : '';
         try { // Look for the minimal well-formed launch.json content: {configurations: []}
             const parsedContent = parse(currentContent);
             if (Array.isArray(parsedContent.configurations)) {
@@ -284,7 +295,6 @@ export class DebugConfigurationManager {
         } catch {
             // Just keep going
         }
-
         const debugType = await this.selectDebugType();
         const configurations = debugType ? await this.provideDebugConfigurations(debugType, model.workspaceFolderUri) : [];
         const content = this.getInitialConfigurationContent(configurations);
@@ -298,6 +308,15 @@ export class DebugConfigurationManager {
     }
     protected async fireWillProvideDebugConfiguration(): Promise<void> {
         await WaitUntilEvent.fire(this.onWillProvideDebugConfigurationEmitter, {});
+    }
+
+    async provideDynamicDebugConfigurations(): Promise<{ type: string, configurations: DebugConfiguration[] }[]> {
+        await this.fireWillProvideDynamicDebugConfiguration();
+        return this.debug.provideDynamicDebugConfigurations!();
+    }
+
+    protected async fireWillProvideDynamicDebugConfiguration(): Promise<void> {
+        await WaitUntilEvent.fire(this.onWillProvideDynamicDebugConfigurationEmitter, {});
     }
 
     protected getInitialConfigurationContent(initialConfigurations: DebugConfiguration[]): string {
@@ -317,10 +336,12 @@ export class DebugConfigurationManager {
         }
         const { languageId } = widget.editor.document;
         const debuggers = await this.debug.getDebuggersForLanguage(languageId);
-        return this.quickPick.show(debuggers.map(
-            ({ label, type }) => ({ label, value: type }),
-            { placeholder: 'Select Environment' })
-        );
+        if (debuggers.length === 0) {
+            return undefined;
+        }
+        const items: Array<QuickPickValue<string>> = debuggers.map(({ label, type }) => ({ label, value: type }));
+        const selectedItem = await this.quickPickService.show(items, { placeholder: 'Select Environment' });
+        return selectedItem?.value;
     }
 
     @inject(StorageService)

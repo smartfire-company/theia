@@ -18,7 +18,7 @@ import { AbstractViewContribution, KeybindingRegistry, LabelProvider, CommonMenu
 import { SearchInWorkspaceWidget } from './search-in-workspace-widget';
 import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
 import { CommandRegistry, MenuModelRegistry, SelectionService, Command } from '@theia/core';
-import { Widget } from '@theia/core/lib/browser/widgets';
+import { codicon, Widget } from '@theia/core/lib/browser/widgets';
 import { NavigatorContextMenu } from '@theia/navigator/lib/browser/navigator-contribution';
 import { UriCommandHandler, UriAwareCommandHandler } from '@theia/core/lib/common/uri-command-handler';
 import URI from '@theia/core/lib/common/uri';
@@ -28,6 +28,7 @@ import { TabBarToolbarContribution, TabBarToolbarRegistry } from '@theia/core/li
 import { EditorManager } from '@theia/editor/lib/browser/editor-manager';
 import { Range } from '@theia/core/shared/vscode-languageserver-types';
 import { FileService } from '@theia/filesystem/lib/browser/file-service';
+import { SEARCH_VIEW_CONTAINER_ID } from './search-in-workspace-factory';
 
 export namespace SearchInWorkspaceCommands {
     const SEARCH_CATEGORY = 'Search';
@@ -49,25 +50,31 @@ export namespace SearchInWorkspaceCommands {
         id: 'search-in-workspace.refresh',
         category: SEARCH_CATEGORY,
         label: 'Refresh',
-        iconClass: 'refresh'
+        iconClass: codicon('refresh')
     };
     export const CANCEL_SEARCH: Command = {
         id: 'search-in-workspace.cancel',
         category: SEARCH_CATEGORY,
         label: 'Cancel Search',
-        iconClass: 'cancel'
+        iconClass: codicon('search-stop')
     };
     export const COLLAPSE_ALL: Command = {
         id: 'search-in-workspace.collapse-all',
         category: SEARCH_CATEGORY,
         label: 'Collapse All',
-        iconClass: 'theia-collapse-all-icon'
+        iconClass: codicon('collapse-all')
+    };
+    export const EXPAND_ALL: Command = {
+        id: 'search-in-workspace.expand-all',
+        category: SEARCH_CATEGORY,
+        label: 'Expand All',
+        iconClass: codicon('expand-all')
     };
     export const CLEAR_ALL: Command = {
         id: 'search-in-workspace.clear-all',
         category: SEARCH_CATEGORY,
         label: 'Clear Search Results',
-        iconClass: 'clear-all'
+        iconClass: codicon('clear-all')
     };
 }
 
@@ -85,6 +92,7 @@ export class SearchInWorkspaceFrontendContribution extends AbstractViewContribut
 
     constructor() {
         super({
+            viewContainerId: SEARCH_VIEW_CONTAINER_ID,
             widgetId: SearchInWorkspaceWidget.ID,
             widgetName: SearchInWorkspaceWidget.LABEL,
             defaultWidgetOptions: {
@@ -148,7 +156,12 @@ export class SearchInWorkspaceFrontendContribution extends AbstractViewContribut
         commands.registerCommand(SearchInWorkspaceCommands.COLLAPSE_ALL, {
             execute: w => this.withWidget(w, widget => widget.collapseAll()),
             isEnabled: w => this.withWidget(w, widget => widget.hasResultList()),
-            isVisible: w => this.withWidget(w, () => true)
+            isVisible: w => this.withWidget(w, widget => !widget.areResultsCollapsed())
+        });
+        commands.registerCommand(SearchInWorkspaceCommands.EXPAND_ALL, {
+            execute: w => this.withWidget(w, widget => widget.expandAll()),
+            isEnabled: w => this.withWidget(w, widget => widget.hasResultList()),
+            isVisible: w => this.withWidget(w, widget => widget.areResultsCollapsed())
         });
         commands.registerCommand(SearchInWorkspaceCommands.CLEAR_ALL, {
             execute: w => this.withWidget(w, widget => widget.clear()),
@@ -233,6 +246,13 @@ export class SearchInWorkspaceFrontendContribution extends AbstractViewContribut
             id: SearchInWorkspaceCommands.COLLAPSE_ALL.id,
             command: SearchInWorkspaceCommands.COLLAPSE_ALL.id,
             tooltip: SearchInWorkspaceCommands.COLLAPSE_ALL.label,
+            priority: 3,
+            onDidChange
+        });
+        toolbarRegistry.registerItem({
+            id: SearchInWorkspaceCommands.EXPAND_ALL.id,
+            command: SearchInWorkspaceCommands.EXPAND_ALL.id,
+            tooltip: SearchInWorkspaceCommands.EXPAND_ALL.label,
             priority: 3,
             onDidChange
         });

@@ -15,6 +15,7 @@
  ********************************************************************************/
 
 import { interfaces } from '@theia/core/shared/inversify';
+import { FrontendApplicationConfigProvider } from '@theia/core/lib/browser/frontend-application-config-provider';
 import {
     createPreferenceProxy,
     PreferenceProxy,
@@ -23,34 +24,48 @@ import {
     PreferenceSchema
 } from '@theia/core/lib/browser/preferences';
 
+const frontendConfig = FrontendApplicationConfigProvider.get();
+
 export const WebviewConfigSchema: PreferenceSchema = {
-    'type': 'object',
-    'properties': {
+    type: 'object',
+    properties: {
         'webview.trace': {
-            'type': 'string',
-            'enum': ['off', 'on', 'verbose'],
-            'description': 'Controls communication tracing with webviews.',
-            'default': 'off'
+            type: 'string',
+            enum: ['off', 'on', 'verbose'],
+            description: 'Controls communication tracing with webviews.',
+            default: 'off'
         }
     }
 };
 
-export interface WebviewConfiguration {
-    'webview.trace': 'off' | 'on' | 'verbose'
+if (frontendConfig.securityWarnings) {
+    WebviewConfigSchema.properties['webview.warnIfUnsecure'] = {
+        scope: 'application',
+        type: 'boolean',
+        description: 'Warns users that webviews are currently deployed unsecurely.',
+        default: true,
+    };
 }
 
+export interface WebviewConfiguration {
+    'webview.trace': 'off' | 'on' | 'verbose'
+    'webview.warnIfUnsecure'?: boolean
+}
+
+export const WebviewPreferenceContribution = Symbol('WebviewPreferenceContribution');
 export const WebviewPreferences = Symbol('WebviewPreferences');
 export type WebviewPreferences = PreferenceProxy<WebviewConfiguration>;
 
-export function createWebviewPreferences(preferences: PreferenceService): WebviewPreferences {
-    return createPreferenceProxy(preferences, WebviewConfigSchema);
+export function createWebviewPreferences(preferences: PreferenceService, schema: PreferenceSchema = WebviewConfigSchema): WebviewPreferences {
+    return createPreferenceProxy(preferences, schema);
 }
 
 export function bindWebviewPreferences(bind: interfaces.Bind): void {
     bind(WebviewPreferences).toDynamicValue(ctx => {
         const preferences = ctx.container.get<PreferenceService>(PreferenceService);
-        return createWebviewPreferences(preferences);
-    });
-
-    bind(PreferenceContribution).toConstantValue({ schema: WebviewConfigSchema });
+        const contribution = ctx.container.get<PreferenceContribution>(WebviewPreferenceContribution);
+        return createWebviewPreferences(preferences, contribution.schema);
+    }).inSingletonScope();
+    bind(WebviewPreferenceContribution).toConstantValue({ schema: WebviewConfigSchema });
+    bind(PreferenceContribution).toService(WebviewPreferenceContribution);
 }

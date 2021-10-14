@@ -100,6 +100,12 @@ export class TreeViewsExtImpl implements TreeViewsExt {
             set title(title: string) {
                 treeView.title = title;
             },
+            get description(): string {
+                return treeView.description;
+            },
+            set description(description: string) {
+                treeView.description = description;
+            },
             reveal: (element: T, revealOptions?: Partial<TreeViewRevealOptions>): Thenable<void> =>
                 treeView.reveal(element, revealOptions),
 
@@ -227,6 +233,16 @@ class TreeViewExtImpl<T> implements Disposable {
         this.proxy.$setTitle(this.treeViewId, title);
     }
 
+    private _description: string = '';
+    get description(): string {
+        return this._description;
+    }
+
+    set description(description: string) {
+        this._description = description;
+        this.proxy.$setDescription(this.treeViewId, this._description);
+    }
+
     getTreeItem(treeItemId: string): T | undefined {
         const element = this.nodes.get(treeItemId);
         return element && element.value;
@@ -320,8 +336,7 @@ class TreeViewExtImpl<T> implements Disposable {
         // ask data provider for children for cached element
         const result = await this.treeDataProvider.getChildren(parent);
         if (result) {
-            const treeItems: TreeViewItem[] = [];
-            const promises = result.map(async (value, index) => {
+            const treeItemPromises = result.map(async (value, index) => {
 
                 // Ask data provider for a tree item for the value
                 // Data provider must return theia.TreeItem
@@ -354,7 +369,7 @@ class TreeViewExtImpl<T> implements Disposable {
                 const { iconPath } = treeItem;
                 if (typeof iconPath === 'string' && iconPath.indexOf('fa-') !== -1) {
                     icon = iconPath;
-                } else if (iconPath instanceof ThemeIcon) {
+                } else if (ThemeIcon.is(iconPath)) {
                     themeIconId = iconPath.id;
                 } else {
                     iconUrl = PluginIconPath.toUrl(<PluginIconPath | undefined>iconPath, this.plugin);
@@ -374,11 +389,10 @@ class TreeViewExtImpl<T> implements Disposable {
                     command: this.commandsConverter.toSafeCommand(treeItem.command, toDisposeElement)
                 } as TreeViewItem;
 
-                treeItems.push(treeViewItem);
+                return treeViewItem;
             });
 
-            await Promise.all(promises);
-            return treeItems;
+            return Promise.all(treeItemPromises);
         } else {
             return undefined;
         }
@@ -450,7 +464,7 @@ class TreeViewExtImpl<T> implements Disposable {
 
     setSelection(selectedItemIds: string[]): void {
         const toDelete = new Set<string>(this.selectedItemIds);
-        for (const id of this.selectedItemIds) {
+        for (const id of selectedItemIds) {
             toDelete.delete(id);
             if (!this.selectedItemIds.has(id)) {
                 this.doSetSelection(selectedItemIds);

@@ -14,11 +14,11 @@
  * SPDX-License-Identifier: EPL-2.0 OR GPL-2.0 WITH Classpath-exception-2.0
  ********************************************************************************/
 
-import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
+import { injectable, inject, postConstruct, optional } from '@theia/core/shared/inversify';
 import {
     ApplicationShell, ViewContainer as ViewContainerWidget, WidgetManager,
     ViewContainerIdentifier, ViewContainerTitleOptions, Widget, FrontendApplicationContribution,
-    StatefulWidget, CommonMenus, BaseWidget, TreeViewWelcomeWidget
+    StatefulWidget, CommonMenus, BaseWidget, TreeViewWelcomeWidget, codicon, ViewContainerPart
 } from '@theia/core/lib/browser';
 import { ViewContainer, View, ViewWelcome } from '../../../common';
 import { PluginSharedStyle } from '../plugin-shared-style';
@@ -31,16 +31,16 @@ import { DebugFrontendApplicationContribution } from '@theia/debug/lib/browser/d
 import { Disposable, DisposableCollection } from '@theia/core/lib/common/disposable';
 import { CommandRegistry } from '@theia/core/lib/common/command';
 import { MenuModelRegistry } from '@theia/core/lib/common/menu';
-import { QuickViewService } from '@theia/core/lib/browser/quick-view-service';
+import { QuickViewService } from '@theia/core/lib/browser';
 import { Emitter } from '@theia/core/lib/common/event';
 import { ContextKeyService } from '@theia/core/lib/browser/context-key-service';
-import { SearchInWorkspaceWidget } from '@theia/search-in-workspace/lib/browser/search-in-workspace-widget';
 import { ViewContextKeyService } from './view-context-key-service';
 import { PROBLEMS_WIDGET_ID } from '@theia/markers/lib/browser/problem/problem-widget';
 import { OUTPUT_WIDGET_KIND } from '@theia/output/lib/browser/output-widget';
 import { DebugConsoleContribution } from '@theia/debug/lib/browser/console/debug-console-contribution';
 import { TERMINAL_WIDGET_FACTORY_ID } from '@theia/terminal/lib/browser/terminal-widget-impl';
 import { TreeViewWidget } from './tree-view-widget';
+import { SEARCH_VIEW_CONTAINER_ID } from '@theia/search-in-workspace/lib/browser/search-in-workspace-factory';
 
 export const PLUGIN_VIEW_FACTORY_ID = 'plugin-view';
 export const PLUGIN_VIEW_CONTAINER_FACTORY_ID = 'plugin-view-container';
@@ -75,7 +75,7 @@ export class PluginViewRegistry implements FrontendApplicationContribution {
     @inject(MenuModelRegistry)
     protected readonly menus: MenuModelRegistry;
 
-    @inject(QuickViewService)
+    @inject(QuickViewService) @optional()
     protected readonly quickView: QuickViewService;
 
     @inject(ContextKeyService)
@@ -91,7 +91,7 @@ export class PluginViewRegistry implements FrontendApplicationContribution {
     private readonly viewsWelcome = new Map<string, ViewWelcome[]>();
     private readonly viewContainers = new Map<string, [string, ViewContainerTitleOptions]>();
     private readonly containerViews = new Map<string, string[]>();
-    private readonly viewClauseContexts = new Map<string, Set<string>>();
+    private readonly viewClauseContexts = new Map<string, Set<string> | undefined>();
 
     private readonly viewDataProviders = new Map<string, ViewDataProvider>();
     private readonly viewDataState = new Map<string, object>();
@@ -100,8 +100,8 @@ export class PluginViewRegistry implements FrontendApplicationContribution {
     protected init(): void {
         // VS Code Viewlets
         this.trackVisibleWidget(EXPLORER_VIEW_CONTAINER_ID, { viewletId: 'workbench.view.explorer' });
-        this.trackVisibleWidget(SearchInWorkspaceWidget.ID, { viewletId: 'workbench.view.search', sideArea: true });
         this.trackVisibleWidget(SCM_VIEW_CONTAINER_ID, { viewletId: 'workbench.view.scm' });
+        this.trackVisibleWidget(SEARCH_VIEW_CONTAINER_ID, { viewletId: 'workbench.view.search' });
         this.trackVisibleWidget(DebugWidget.ID, { viewletId: 'workbench.view.debug' });
         // TODO workbench.view.extensions - Theia does not have a proper extension view yet
 
@@ -111,7 +111,6 @@ export class PluginViewRegistry implements FrontendApplicationContribution {
         this.trackVisibleWidget(DebugConsoleContribution.options.id, { panelId: 'workbench.panel.repl' });
         this.trackVisibleWidget(TERMINAL_WIDGET_FACTORY_ID, { panelId: 'workbench.panel.terminal' });
         // TODO workbench.panel.comments - Theia does not have a proper comments view yet
-        this.trackVisibleWidget(SearchInWorkspaceWidget.ID, { panelId: 'workbench.view.search', sideArea: false });
 
         this.updateFocusedView();
         this.shell.onDidChangeActiveWidget(() => this.updateFocusedView());
@@ -122,6 +121,9 @@ export class PluginViewRegistry implements FrontendApplicationContribution {
             }
             if (factoryId === SCM_VIEW_CONTAINER_ID && widget instanceof ViewContainerWidget) {
                 waitUntil(this.prepareViewContainer('scm', widget));
+            }
+            if (factoryId === SEARCH_VIEW_CONTAINER_ID && widget instanceof ViewContainerWidget) {
+                waitUntil(this.prepareViewContainer('search', widget));
             }
             if (factoryId === DebugWidget.ID && widget instanceof DebugWidget) {
                 const viewContainer = widget['sessionWidget']['viewContainer'];
@@ -146,7 +148,7 @@ export class PluginViewRegistry implements FrontendApplicationContribution {
         });
         this.doRegisterViewContainer('test', 'left', {
             label: 'Test',
-            iconClass: 'theia-plugin-test-tab-icon',
+            iconClass: codicon('beaker'),
             closeable: true
         });
         this.contextKeyService.onDidChange(e => {
@@ -231,6 +233,18 @@ export class PluginViewRegistry implements FrontendApplicationContribution {
         return toDispose;
     }
 
+    protected async toggleViewContainer(id: string): Promise<void> {
+        let widget = await this.getPluginViewContainer(id);
+        if (widget && widget.isAttached) {
+            widget.dispose();
+        } else {
+            widget = await this.openViewContainer(id);
+            if (widget) {
+                this.shell.activateWidget(widget.id);
+            }
+        }
+    }
+
     protected doRegisterViewContainer(id: string, location: string, options: ViewContainerTitleOptions): Disposable {
         const toDispose = new DisposableCollection();
         this.viewContainers.set(id, [location, options]);
@@ -240,23 +254,13 @@ export class PluginViewRegistry implements FrontendApplicationContribution {
             id: toggleCommandId,
             label: 'Toggle ' + options.label + ' View'
         }, {
-            execute: async () => {
-                let widget = await this.getPluginViewContainer(id);
-                if (widget) {
-                    widget.dispose();
-                } else {
-                    widget = await this.openViewContainer(id);
-                    if (widget) {
-                        this.shell.activateWidget(widget.id);
-                    }
-                }
-            }
+            execute: () => this.toggleViewContainer(id)
         }));
         toDispose.push(this.menus.registerMenuAction(CommonMenus.VIEW_VIEWS, {
             commandId: toggleCommandId,
             label: options.label
         }));
-        toDispose.push(this.quickView.registerItem({
+        toDispose.push(this.quickView?.registerItem({
             label: options.label,
             open: async () => {
                 const widget = await this.openViewContainer(id);
@@ -300,10 +304,13 @@ export class PluginViewRegistry implements FrontendApplicationContribution {
         }));
 
         if (view.when && view.when !== 'false' && view.when !== 'true') {
-            this.viewClauseContexts.set(view.id, this.contextKeyService.parseKeys(view.when));
-            toDispose.push(Disposable.create(() => this.viewClauseContexts.delete(view.id)));
+            const keys = this.contextKeyService.parseKeys(view.when);
+            if (keys) {
+                this.viewClauseContexts.set(view.id, keys);
+                toDispose.push(Disposable.create(() => this.viewClauseContexts.delete(view.id)));
+            }
         }
-        toDispose.push(this.quickView.registerItem({
+        toDispose.push(this.quickView?.registerItem({
             label: view.name,
             when: view.when,
             open: () => this.openView(view.id, { activate: true })
@@ -396,7 +403,9 @@ export class PluginViewRegistry implements FrontendApplicationContribution {
             return;
         }
         const [, view] = data;
-        widget.title.label = view.name;
+        if (!widget.title.label) {
+            widget.title.label = view.name;
+        }
         const currentDataWidget = widget.widgets[0];
         const viewDataWidget = await this.createViewDataWidget(view.id);
         if (widget.isDisposed) {
@@ -412,6 +421,11 @@ export class PluginViewRegistry implements FrontendApplicationContribution {
                 widget.addWidget(viewDataWidget);
             }
         }
+    }
+
+    protected getOrCreateViewContainerWidget(containerId: string): Promise<ViewContainerWidget> {
+        const identifier = this.toViewContainerIdentifier(containerId);
+        return this.widgetManager.getOrCreateWidget<ViewContainerWidget>(PLUGIN_VIEW_CONTAINER_FACTORY_ID, identifier);
     }
 
     async openViewContainer(containerId: string): Promise<ViewContainerWidget | undefined> {
@@ -438,8 +452,7 @@ export class PluginViewRegistry implements FrontendApplicationContribution {
             return undefined;
         }
         const [location] = data;
-        const identifier = this.toViewContainerIdentifier(containerId);
-        const containerWidget = await this.widgetManager.getOrCreateWidget<ViewContainerWidget>(PLUGIN_VIEW_CONTAINER_FACTORY_ID, identifier);
+        const containerWidget = await this.getOrCreateViewContainerWidget(containerId);
         if (!containerWidget.isAttached) {
             await this.shell.addWidget(containerWidget, {
                 area: ApplicationShell.isSideArea(location) ? location : 'left',
@@ -457,6 +470,14 @@ export class PluginViewRegistry implements FrontendApplicationContribution {
         }
         for (const viewId of this.getContainerViews(viewContainerId)) {
             const identifier = this.toPluginViewWidgetIdentifier(viewId);
+            // Keep existing widget in its current container and reregister its part to the plugin view widget events.
+            const existingWidget = this.widgetManager.tryGetWidget<PluginViewWidget>(PLUGIN_VIEW_FACTORY_ID, identifier);
+            if (existingWidget && existingWidget.currentViewContainerId) {
+                const currentContainer = await this.getPluginViewContainer(existingWidget.currentViewContainerId);
+                if (currentContainer && this.registerWidgetPartEvents(existingWidget, currentContainer)) {
+                    continue;
+                }
+            }
             const widget = await this.widgetManager.getOrCreateWidget<PluginViewWidget>(PLUGIN_VIEW_FACTORY_ID, identifier);
             if (containerWidget.getTrackableWidgets().indexOf(widget) === -1) {
                 containerWidget.addWidget(widget, {
@@ -464,27 +485,49 @@ export class PluginViewRegistry implements FrontendApplicationContribution {
                     initiallyHidden: !this.isViewVisible(viewId)
                 });
             }
-            const part = containerWidget.getPartFor(widget);
-            if (part) {
-                // if a view is explicitly hidden then suppress updating visibility based on `when` closure
-                part.onDidChangeVisibility(() => widget.suppressUpdateViewVisibility = part.isHidden);
+            this.registerWidgetPartEvents(widget, containerWidget);
+        }
+    }
 
-                const tryFireOnDidExpandView = () => {
-                    if (widget.widgets.length === 0) {
-                        if (!part.collapsed && part.isVisible) {
-                            this.onDidExpandViewEmitter.fire(viewId);
-                        }
-                    } else {
-                        toFire.dispose();
+    protected registerWidgetPartEvents(widget: PluginViewWidget, containerWidget: ViewContainerWidget): ViewContainerPart | undefined {
+        const part = containerWidget.getPartFor(widget);
+        if (part) {
+
+            widget.currentViewContainerId = this.getViewContainerId(containerWidget);
+            part.onDidMove(event => { widget.currentViewContainerId = this.getViewContainerId(event); });
+
+            // if a view is explicitly hidden then suppress updating visibility based on `when` closure
+            part.onDidChangeVisibility(() => widget.suppressUpdateViewVisibility = part.isHidden);
+
+            const tryFireOnDidExpandView = () => {
+                if (widget.widgets.length === 0) {
+                    if (!part.collapsed && part.isVisible) {
+                        const viewId = this.toViewId(widget.options);
+                        this.onDidExpandViewEmitter.fire(viewId);
                     }
-                };
-                const toFire = new DisposableCollection(
-                    part.onCollapsed(tryFireOnDidExpandView),
-                    part.onDidChangeVisibility(tryFireOnDidExpandView)
-                );
+                } else {
+                    toFire.dispose();
+                }
+            };
+            const toFire = new DisposableCollection(
+                part.onCollapsed(tryFireOnDidExpandView),
+                part.onDidChangeVisibility(tryFireOnDidExpandView)
+            );
 
-                tryFireOnDidExpandView();
-            }
+            tryFireOnDidExpandView();
+            return part;
+        }
+    };
+
+    protected getViewContainerId(container: ViewContainerWidget): string | undefined {
+        const description = this.widgetManager.getDescription(container);
+        switch (description?.factoryId) {
+            case EXPLORER_VIEW_CONTAINER_ID: return 'explorer';
+            case SCM_VIEW_CONTAINER_ID: return 'scm';
+            case SEARCH_VIEW_CONTAINER_ID: return 'search';
+            case undefined: return container.parent?.parent instanceof DebugWidget ? 'debug' : container.id;
+            case PLUGIN_VIEW_CONTAINER_FACTORY_ID: return this.toViewContainerId(description.options);
+            default: return container.id;
         }
     }
 
@@ -494,6 +537,9 @@ export class PluginViewRegistry implements FrontendApplicationContribution {
         }
         if (viewContainerId === 'scm') {
             return this.widgetManager.getWidget<ViewContainerWidget>(SCM_VIEW_CONTAINER_ID);
+        }
+        if (viewContainerId === 'search') {
+            return this.widgetManager.getWidget<ViewContainerWidget>(SEARCH_VIEW_CONTAINER_ID);
         }
         if (viewContainerId === 'debug') {
             const debug = await this.widgetManager.getWidget(DebugWidget.ID);
@@ -505,20 +551,24 @@ export class PluginViewRegistry implements FrontendApplicationContribution {
         return this.widgetManager.getWidget<ViewContainerWidget>(PLUGIN_VIEW_CONTAINER_FACTORY_ID, identifier);
     }
 
+    protected async initViewContainer(containerId: string): Promise<void> {
+        let viewContainer = await this.getPluginViewContainer(containerId);
+        if (!viewContainer) {
+            viewContainer = await this.openViewContainer(containerId);
+            if (viewContainer && !viewContainer.getParts().filter(part => !part.isHidden).length) {
+                // close view containers without any visible view parts
+                viewContainer.dispose();
+            }
+        } else {
+            await this.prepareViewContainer(this.toViewContainerId(viewContainer.options), viewContainer);
+        }
+    }
+
     async initWidgets(): Promise<void> {
         const promises: Promise<void>[] = [];
         for (const id of this.viewContainers.keys()) {
             promises.push((async () => {
-                let viewContainer = await this.getPluginViewContainer(id);
-                if (!viewContainer) {
-                    viewContainer = await this.openViewContainer(id);
-                    if (viewContainer && !viewContainer.getParts().filter(part => !part.isHidden).length) {
-                        // close view containers without any visible view parts
-                        viewContainer.dispose();
-                    }
-                } else {
-                    await this.prepareViewContainer(this.toViewContainerId(viewContainer.options), viewContainer);
-                }
+                await this.initViewContainer(id);
             })().catch(console.error));
         }
         promises.push((async () => {
@@ -531,6 +581,12 @@ export class PluginViewRegistry implements FrontendApplicationContribution {
             const scm = await this.widgetManager.getWidget(SCM_VIEW_CONTAINER_ID);
             if (scm instanceof ViewContainerWidget) {
                 await this.prepareViewContainer('scm', scm);
+            }
+        })().catch(console.error));
+        promises.push((async () => {
+            const search = await this.widgetManager.getWidget(SEARCH_VIEW_CONTAINER_ID);
+            if (search instanceof ViewContainerWidget) {
+                await this.prepareViewContainer('search', search);
             }
         })().catch(console.error));
         promises.push((async () => {

@@ -18,7 +18,7 @@ import { Terminal, RendererType } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import { inject, injectable, named, postConstruct } from '@theia/core/shared/inversify';
 import { ContributionProvider, Disposable, Event, Emitter, ILogger, DisposableCollection } from '@theia/core';
-import { Widget, Message, WebSocketConnectionProvider, StatefulWidget, isFirefox, MessageLoop, KeyCode } from '@theia/core/lib/browser';
+import { Widget, Message, WebSocketConnectionProvider, StatefulWidget, isFirefox, MessageLoop, KeyCode, codicon } from '@theia/core/lib/browser';
 import { isOSX } from '@theia/core/lib/common';
 import { WorkspaceService } from '@theia/workspace/lib/browser';
 import { ShellTerminalServerProxy, IShellTerminalPreferences } from '../common/shell-terminal-protocol';
@@ -61,6 +61,7 @@ export class TerminalWidgetImpl extends TerminalWidget implements StatefulWidget
     protected hoverMessage: HTMLDivElement;
     protected lastTouchEnd: TouchEvent | undefined;
     protected isAttachedCloseListener: boolean = false;
+    lastCwd = new URI();
 
     @inject(WorkspaceService) protected readonly workspaceService: WorkspaceService;
     @inject(WebSocketConnectionProvider) protected readonly webSocketConnectionProvider: WebSocketConnectionProvider;
@@ -94,7 +95,7 @@ export class TerminalWidgetImpl extends TerminalWidget implements StatefulWidget
     @postConstruct()
     protected init(): void {
         this.setTitle(this.options.title || this.TERMINAL);
-        this.title.iconClass = 'fa fa-terminal';
+        this.title.iconClass = codicon('terminal');
 
         if (this.options.kind) {
             this.terminalKind = this.options.kind;
@@ -233,6 +234,10 @@ export class TerminalWidgetImpl extends TerminalWidget implements StatefulWidget
             this.onDataEmitter.fire(data);
         }));
 
+        this.toDispose.push(this.term.onBinary(data => {
+            this.onDataEmitter.fire(data);
+        }));
+
         for (const contribution of this.terminalContributionProvider.getContributions()) {
             contribution.onCreate(this);
         }
@@ -298,7 +303,10 @@ export class TerminalWidgetImpl extends TerminalWidget implements StatefulWidget
         }
         if (this.terminalService.getById(this.id)) {
             return this.shellTerminalServer.getCwdURI(this.terminalId)
-                .then(cwdUrl => new URI(cwdUrl));
+                .then(cwdUrl => {
+                    this.lastCwd = new URI(cwdUrl);
+                    return this.lastCwd;
+                }).catch(() => this.lastCwd);
         }
         return Promise.resolve(new URI());
     }
@@ -495,7 +503,10 @@ export class TerminalWidgetImpl extends TerminalWidget implements StatefulWidget
                     }
                 };
 
-                const disposable = this.term.onData(sendData);
+                const disposable = new DisposableCollection();
+                disposable.push(this.term.onData(sendData));
+                disposable.push(this.term.onBinary(sendData));
+
                 connection.onDispose(() => disposable.dispose());
 
                 this.toDisposeOnConnect.push(connection);

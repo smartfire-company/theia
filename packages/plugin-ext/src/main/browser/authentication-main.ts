@@ -30,10 +30,11 @@ import {
     AuthenticationService,
     readAllowedExtensions
 } from '@theia/core/lib/browser/authentication-service';
-import { QuickPickItem, QuickPickService } from '@theia/core/lib/common/quick-pick-service';
+import { QuickPickService } from '@theia/core/lib/common/quick-pick-service';
 import {
     AuthenticationSession
 } from '../../common/plugin-api-rpc-model';
+import { QuickPickValue } from '@theia/core/lib/browser/quick-input/quick-input-service';
 import {AuthenticationProviderAuthenticationSessionsChangeEvent, Event} from '@theia/plugin';
 
 export function getAuthenticationProviderActivationEvent(id: string): string { return `onAuthenticationRequest:${id}`; }
@@ -147,7 +148,7 @@ export class AuthenticationMainImpl implements AuthenticationMain {
         }
 
         return new Promise(async (resolve, reject) => {
-            const items: QuickPickItem<{ session?: AuthenticationSession }>[] = potentialSessions.map(session => ({
+            const items: QuickPickValue<{ session?: AuthenticationSession }>[] = potentialSessions.map(session => ({
                 label: session.account.label,
                 value: { session }
             }));
@@ -155,13 +156,13 @@ export class AuthenticationMainImpl implements AuthenticationMain {
                 label: 'Sign in to another account',
                 value: { session: undefined }
             });
-            const selected = await this.quickPickService.show<{ session?: AuthenticationSession }>(items,
+            const selected = await this.quickPickService.show(items,
                 {
                     title: `The extension '${extensionName}' wants to access a ${providerName} account`,
                     ignoreFocusOut: true
                 });
             if (selected) {
-                const session = selected.session ?? await this.authenticationService.login(providerId, scopes);
+                const session = selected.value?.session ?? await this.authenticationService.login(providerId, scopes);
                 const accountName = session.account.label;
 
                 const allowList = await readAllowedExtensions(this.storageService, providerId, accountName);

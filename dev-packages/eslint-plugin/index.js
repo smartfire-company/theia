@@ -17,5 +17,7 @@
 
 /** @type {{[ruleId: string]: import('eslint').Rule.RuleModule}} */
 exports.rules = {
-    "shared-dependencies": require('./rules/shared-dependencies'),
+    "no-src-import": require('./rules/no-src-import'),
+    "runtime-import-check": require('./rules/runtime-import-check'),
+    "shared-dependencies": require('./rules/shared-dependencies')
 };
